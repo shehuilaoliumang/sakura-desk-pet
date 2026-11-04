@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { FORM_IDS, STATUS_LABEL, type FormId, type PackClip, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
-import { openSettings, postForm, quitApp } from "../api";
+import { openSettings, postForm, putWindowScale, quitApp } from "../api";
 import { useBackend } from "../useBackend";
 import { PetFigure } from "./figures";
 
@@ -9,6 +9,10 @@ export function PetApp() {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [pressed, setPressed] = useState(false);
   const [reaction, setReaction] = useState(false);
+  const [zoomHint, setZoomHint] = useState<number | null>(null);
+  const scaleRef = useRef(1);
+  const zoomTimer = useRef<number | null>(null);
+  const hintTimer = useRef<number | null>(null);
 
   const settings = backend.settings;
   const state = backend.state;
@@ -54,6 +58,34 @@ export function PetApp() {
     window.addEventListener("pointerdown", close);
     return () => window.removeEventListener("pointerdown", close);
   }, [menu]);
+
+  useEffect(() => {
+    if (settings?.window.scale != null) scaleRef.current = settings.window.scale;
+  }, [settings?.window.scale]);
+
+  useEffect(() => {
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      const delta = event.deltaY > 0 ? -0.05 : 0.05;
+      const next = Math.round(Math.min(2, Math.max(0.4, scaleRef.current + delta)) * 100) / 100;
+      if (next === scaleRef.current) return;
+      scaleRef.current = next;
+      setZoomHint(Math.round(next * 100));
+      if (hintTimer.current) window.clearTimeout(hintTimer.current);
+      hintTimer.current = window.setTimeout(() => setZoomHint(null), 800);
+      if (zoomTimer.current) window.clearTimeout(zoomTimer.current);
+      zoomTimer.current = window.setTimeout(() => {
+        void putWindowScale(scaleRef.current);
+      }, 80);
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      window.removeEventListener("wheel", onWheel);
+      if (zoomTimer.current) window.clearTimeout(zoomTimer.current);
+      if (hintTimer.current) window.clearTimeout(hintTimer.current);
+    };
+  }, []);
 
   if (!settings || !state || !work) {
     return (
@@ -180,6 +212,7 @@ export function PetApp() {
         </div>
       ) : null}
 
+      {zoomHint != null ? <div className="zoom-hint" data-no-drag>{zoomHint}%</div> : null}
       {backend.error ? <p className="pet-error" data-no-drag>{backend.error}</p> : null}
     </div>
   );

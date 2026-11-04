@@ -30,6 +30,15 @@ export async function putSettings(settings: Settings): Promise<ConfigResponse | 
   return response.json() as Promise<ConfigResponse | { ok: false; reason?: string; issues?: string[] }>;
 }
 
+
+export async function putWindowScale(scale: number): Promise<ConfigResponse | { ok: false; reason?: string; issues?: string[] }> {
+  const response = await fetch(/pet/config, {
+    method: PUT,
+    headers: userHeaders,
+    body: JSON.stringify({ window: { scale } }),
+  });
+  return response.json() as Promise<ConfigResponse | { ok: false; reason?: string; issues?: string[] }>;
+}
 export async function postForm(form: FormId): Promise<{ ok: boolean; activeForm?: FormId; reason?: string }> {
   const response = await fetch("/pet/form", {
     method: "POST",
