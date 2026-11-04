@@ -6,7 +6,8 @@ import { PetFigure } from "./figures";
 
 export function PetApp() {
   const backend = useBackend();
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; side: string } | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const [pressed, setPressed] = useState(false);
   const [reaction, setReaction] = useState(false);
   const [zoomHint, setZoomHint] = useState<number | null>(null);
@@ -165,7 +166,8 @@ export function PetApp() {
       }}
       onContextMenu={(event) => {
         event.preventDefault();
-        setMenu({ x: event.clientX, y: event.clientY });
+        const stage = stageRef.current?.getBoundingClientRect();
+        setMenu(placeContextMenu(event.clientX, event.clientY, stage));
       }}
     >
       <div className={`bubbles count-${bubbleCols(activeForm, lines.length, settings.window.scale)}`} data-hit>
@@ -179,7 +181,7 @@ export function PetApp() {
         )}
       </div>
 
-      <div className="stage" data-hit>
+      <div className="stage" data-hit ref={stageRef}>
         <Figure
           form={activeForm}
           mood={mood}
@@ -194,10 +196,10 @@ export function PetApp() {
 
       {menu ? (
         <div
-          className="menu"
+          className={`menu side-${menu.side}`}
           data-no-drag
           data-hit
-          style={{ left: Math.min(menu.x, window.innerWidth - 180), top: Math.min(menu.y, window.innerHeight - 220) }}
+          style={{ left: menu.x, top: menu.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div className="menu-status" aria-live="polite">
@@ -234,6 +236,31 @@ export function PetApp() {
   );
 }
 
+
+
+/** dsh-pet style: dock beside the figure, clamp into window∩viewport; do not cover the stage when space exists. */
+function placeContextMenu(
+  clickX: number,
+  clickY: number,
+  stage: DOMRect | undefined,
+  menuW = 188,
+  menuH = 240,
+): { x: number; y: number; side: string } {
+  const gap = 6;
+  const clamp = { x: 4, y: 4, w: window.innerWidth - 8, h: window.innerHeight - 8 };
+  const clampX = (v: number) => Math.max(clamp.x, Math.min(v, Math.max(clamp.x, clamp.x + clamp.w - menuW)));
+  const clampY = (v: number) => Math.max(clamp.y, Math.min(v, Math.max(clamp.y, clamp.y + clamp.h - menuH)));
+  const anchor = stage ?? new DOMRect(clickX - 40, clickY - 40, 80, 80);
+  const cands: { side: string; x: number; y: number; score: number }[] = [
+    { side: "right", x: anchor.right + gap, y: clickY - 12, score: clamp.x + clamp.w - (anchor.right + gap) },
+    { side: "left", x: anchor.left - gap - menuW, y: clickY - 12, score: anchor.left - clamp.x - menuW },
+    { side: "bottom", x: anchor.left, y: anchor.bottom + gap, score: clamp.y + clamp.h - (anchor.bottom + gap) },
+    { side: "top", x: anchor.left, y: anchor.top - gap - menuH, score: anchor.top - clamp.y - menuH },
+  ];
+  cands.sort((a, b) => b.score - a.score);
+  const best = cands.find((c) => c.score >= menuW * 0.35) ?? cands[0];
+  return { x: clampX(best.x), y: clampY(best.y), side: best.side };
+}
 
 function bubbleCols(form: FormId, lineCount: number, scale: number): number {
   if (form === "duo") return scale >= 0.6 ? 2 : 1;

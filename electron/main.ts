@@ -8,6 +8,24 @@ import type http from "node:http";
 
 const BASE_W = 360;
 const BASE_H = 520;
+/** Match dsh-pet: window keeps side chrome so menus/bubbles fit without covering the figure. */
+const WINDOW_MARGIN_RATIO = 0.5;
+function petWindowSize(scale: number): { width: number; height: number; contentW: number; contentH: number; side: number; top: number; bottom: number } {
+  const contentW = Math.round(BASE_W * scale);
+  const contentH = Math.round(BASE_H * scale);
+  const side = Math.max(96, Math.round(contentW * WINDOW_MARGIN_RATIO));
+  const top = Math.max(72, Math.round(side * 0.7));
+  const bottom = Math.max(36, Math.round(side * 0.35));
+  return {
+    contentW,
+    contentH,
+    side,
+    top,
+    bottom,
+    width: contentW + side * 2,
+    height: contentH + top + bottom,
+  };
+}
 
 app.setName("sakura-pet");
 app.setPath("userData", dataDir());
@@ -73,11 +91,12 @@ function rendererUrl(hash: string): string | null {
 function createPetWindow(): void {
   if (!runtime) return;
   const scale = runtime.settings.window.scale;
+  const initial = petWindowSize(scale);
   const icon = path.join(appRoot(), "assets", "icon.png");
   petWin = new BrowserWindow({
     ...(fs.existsSync(icon) ? { icon } : {}),
-    width: Math.round(BASE_W * scale),
-    height: Math.round(BASE_H * scale),
+    width: initial.width,
+    height: initial.height,
     show: false,
     frame: false,
     transparent: true,
@@ -96,6 +115,7 @@ function createPetWindow(): void {
     },
   });
   petWin.setMenuBarVisibility(false);
+  petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
   placePet(true);
   const dev = rendererUrl("/pet");
   if (dev) void petWin.loadURL(dev);
@@ -107,7 +127,7 @@ function createPetWindow(): void {
     console.error(`[sakura-pet] failed to load ${url} ${code} ${description}`);
   });
   petWin.setIgnoreMouseEvents(true, { forward: true });
-  petWin.setMinimumSize(Math.round(BASE_W * 0.4), Math.round(BASE_H * 0.4));
+  petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
   petWin.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
   petWin.once("ready-to-show", () => petWin?.show());
   petWin.on("closed", () => {
@@ -189,9 +209,10 @@ function placePet(force: boolean): void {
 
 function applyChrome(place: boolean): void {
   if (!runtime || !petWin) return;
-  const [w, h] = [Math.round(BASE_W * runtime.settings.window.scale), Math.round(BASE_H * runtime.settings.window.scale)];
+  const size = petWindowSize(runtime.settings.window.scale);
   const [x, y] = petWin.getPosition();
-  petWin.setBounds({ x, y, width: w, height: h });
+  petWin.setBounds({ x, y, width: size.width, height: size.height });
+  petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
   petWin.setAlwaysOnTop(settingsWin?.isFocused() ? false : runtime.settings.window.alwaysOnTop, "screen-saver");
   if (place) placePet(true);
 }
@@ -244,6 +265,7 @@ function wireIpc(): void {
     if (!win || win !== petWin) return;
     win.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
   });
+
   ipcMain.on("sakura:reveal", (_event, target: unknown) => {
     if (!runtime) return;
     const config = runtime.getConfig();
