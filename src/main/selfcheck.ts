@@ -223,6 +223,7 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   assert(fresh.llm.provider === "openai-compatible", "default llm provider");
   assert(fresh.llm.apiKey === "", "llm key defaults empty");
   assert(fresh.llm.baseUrl === "", "llm base url defaults empty");
+  assert(fresh.theme === "warm", "default theme is warm");
   assert(openAiCompatibleChatUrl("https://llm.invalid/v1") === "https://llm.invalid/v1/chat/completions", "v1 base joins chat completions");
   assert(openAiCompatibleChatUrl("https://llm.invalid/v1/") === "https://llm.invalid/v1/chat/completions", "trailing slash is stripped");
   assert(openAiCompatibleChatUrl("https://llm.invalid") === "https://llm.invalid/v1/chat/completions", "host gets /v1/chat/completions");
@@ -393,6 +394,13 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   const partial = new PetRuntime({ dataDir: partialDir, appRoot: root });
   partial.load();
   assert(partial.settings.llm.enabled === false, "old settings file keeps llm off");
+  assert(partial.settings.theme === "warm", "old settings file keeps the warm theme");
+  const glass = await call(base, "PUT", "/pet/config", { theme: "glass" }, user);
+  assert(glass.status === 200 && (glass.json.settings as Settings).theme === "glass", "glass theme persists");
+  const unknown = await call(base, "PUT", "/pet/config", { theme: "neon" }, user);
+  assert((unknown.json.settings as Settings).theme === "glass", "unknown theme is ignored");
+  const warmed = await call(base, "PUT", "/pet/config", { theme: "warm" }, user);
+  assert((warmed.json.settings as Settings).theme === "warm", "warm theme can be restored");
   assert(partial.settings.llm.provider === "openai-compatible", "old settings file gets the default provider");
   assert(partial.settings.llm.apiKey === "", "old settings file does not invent a key");
   assert(partial.settings.honorific === "前辈", "old settings file keeps the honorific");

@@ -146,6 +146,7 @@ function createPetWindow(): void {
 function openSettings(): void {
   if (!runtime) return;
   if (settingsWin) {
+    paintSettingsChrome();
     settingsWin.show();
     settingsWin.focus();
     return;
@@ -158,7 +159,7 @@ function openSettings(): void {
     minHeight: 560,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: "#e8eef5",
+    backgroundColor: settingsChromeColor(),
     title: "樱 · 设置",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -293,7 +294,17 @@ function placePet(force: boolean): void {
   );
 }
 
+function settingsChromeColor(): string {
+  return runtime?.settings.theme === "glass" ? "#e8eef5" : "#f3eee6";
+}
+
+function paintSettingsChrome(): void {
+  if (!settingsWin || settingsWin.isDestroyed()) return;
+  settingsWin.setBackgroundColor(settingsChromeColor());
+}
+
 function applyChrome(place: boolean): void {
+  paintSettingsChrome();
   if (!runtime || !petWin || dragSession) return;
   if (menuChrome && currentFit) {
     menuChrome = { x: menuChrome.x, y: menuChrome.y, width: currentFit.width, height: currentFit.height };

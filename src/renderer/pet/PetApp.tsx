@@ -18,6 +18,7 @@ export function PetApp() {
   const [ask, setAsk] = useState("");
   const [asking, setAsking] = useState(false);
   const [chatNote, setChatNote] = useState("");
+  const [chatOpen, setChatOpen] = useState(false);
   const chatRef = useRef<HTMLInputElement | null>(null);
   const [layout, setLayout] = useState<PetLayoutEvent | null>(null);
   const scaleRef = useRef(1);
@@ -36,8 +37,40 @@ export function PetApp() {
   const clickFrames = formPack?.click?.frames ?? [];
 
   useEffect(() => {
+    document.documentElement.dataset.theme = settings?.theme === "glass" ? "glass" : "warm";
+  }, [settings?.theme]);
+
+  useEffect(() => {
+    if (!chatOpen) return;
+    const id = window.setTimeout(() => chatRef.current?.focus(), 40);
+    return () => window.clearTimeout(id);
+  }, [chatOpen]);
+
+  useEffect(() => {
+    if (!chatOpen) return;
+    const close = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest(".chat-pill") || target?.closest(".menu")) return;
+      setChatOpen(false);
+      setAsk("");
+      setChatNote("");
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [chatOpen]);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.repeat) return;
+      if (event.key === "Escape") {
+        setChatOpen(false);
+        setAsk("");
+        setChatNote("");
+        setMenu(null);
+        setMenuPad(null);
+        void window.sakuraPet?.restoreMenu?.();
+        return;
+      }
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       const byKey: Record<string, FormId | undefined> = {
         "1": "normal",
@@ -52,7 +85,6 @@ export function PetApp() {
         setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.();
       }
       if (event.key === ",") openSettings();
-      if (event.key === "Escape") setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -264,6 +296,7 @@ export function PetApp() {
       </div>
 
       <div className="stage" data-hit ref={stageRef}>
+        {chatOpen ? (
         <form
           className="chat-pill"
           data-no-drag
@@ -274,16 +307,17 @@ export function PetApp() {
             if (!message || asking) return;
             setAsking(true);
             setChatNote("");
-            void postLlmChat(message).then((result) => {
-              if (result.source === "fallback") setChatNote(result.detail || "……这会儿说不了。");
-              else setChatNote("");
+            void postLlmChat(message).then(() => {
+              setAsk("");
+              setChatNote("");
+              setChatOpen(false);
             }).catch(() => {
               setChatNote("接口没有应答");
             }).finally(() => {
               setAsking(false);
-              setAsk("");
             });
           }}
+          onPointerDown={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.stopPropagation()}
         >
           <input
@@ -311,6 +345,7 @@ export function PetApp() {
           </div>
           {chatNote ? <p className="chat-note">{chatNote}</p> : null}
         </form>
+        ) : null}
         <Figure
           form={activeForm}
           mood={mood}
@@ -363,7 +398,7 @@ export function PetApp() {
               setMenu(null);
               setMenuPad(null);
               void window.sakuraPet?.restoreMenu?.();
-              window.setTimeout(() => chatRef.current?.focus(), 60);
+              setChatOpen(true);
             }}
           >
             <span>对话</span>

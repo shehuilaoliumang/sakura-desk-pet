@@ -85,5 +85,6 @@ export function defaultSettings(): Settings {
       model: "",
       timeoutMs: 20_000,
     },
+    theme: "warm",
   };
 }

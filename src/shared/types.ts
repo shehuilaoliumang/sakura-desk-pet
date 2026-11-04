@@ -10,6 +10,13 @@ export type AdapterId = (typeof ADAPTER_IDS)[number];
 /** Known ids live in the provider registry. Stored as a string so a new provider does not need a settings migration. */
 export const DEFAULT_LLM_PROVIDER = "openai-compatible";
 
+export const THEME_IDS = ["warm", "glass"] as const;
+export type ThemeId = (typeof THEME_IDS)[number];
+
+export function isThemeId(value: string): value is ThemeId {
+  return (THEME_IDS as readonly string[]).includes(value);
+}
+
 export interface LlmSettings {
   enabled: boolean;
   provider: string;
@@ -102,6 +109,8 @@ export interface Settings {
     alwaysOnTop: boolean;
   };
   llm: LlmSettings;
+  /** warm = 经典暖色, glass = 浅色毛玻璃 */
+  theme: ThemeId;
 }
 
 export interface SpeechLine {

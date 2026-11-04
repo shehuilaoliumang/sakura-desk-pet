@@ -10,6 +10,7 @@ import {
   type FormId,
   type PetEvent,
   type Settings,
+  type ThemeId,
 } from "@shared/types";
 import { INSPIRATION_URL } from "@shared/version";
 import { postForm, postLlmChat, postLlmTest, postReset, putSettings, quitApp, reloadPack, reveal } from "../api";
@@ -45,6 +46,11 @@ export function SettingsApp() {
   useEffect(() => {
     if (backend.settings && !dirty.current) setDraft(backend.settings);
   }, [backend.settings]);
+
+  useEffect(() => {
+    const theme = draft?.theme ?? backend.settings?.theme;
+    document.documentElement.dataset.theme = theme === "glass" ? "glass" : "warm";
+  }, [draft?.theme, backend.settings?.theme]);
 
   useEffect(() => () => {
     if (timer.current) window.clearTimeout(timer.current);
@@ -190,6 +196,19 @@ export function SettingsApp() {
 
         <Section id="basic" title="基础设置" summary={draft.forms[draft.activeForm].displayName} open={openSections.basic} onToggle={toggleSection}>
           <div className="subblock">
+            <h3>配色</h3>
+            <label className="field">
+              <span>主题</span>
+              <select
+                value={draft.theme}
+                onChange={(event) => edit((current) => ({ ...current, theme: event.target.value as ThemeId }))}
+              >
+                <option value="warm">经典暖色</option>
+                <option value="glass">浅色毛玻璃</option>
+              </select>
+            </label>
+          </div>
+          <div className="subblock">
             <h3>称呼</h3>
             <p className="hint">称谓是常态樱的叫法，黑樱在不允许直呼时也用它。昵称只在打开直呼之后交给黑樱。</p>
             <label className="field">
@@ -249,7 +268,7 @@ export function SettingsApp() {
         <Section id="chat" title="对话设置" summary={draft.llm.enabled ? "已打开" : "未打开"} open={openSections.chat} onToggle={toggleSection}>
           <p className="hint">
             空闲、工作、等待这些状态气泡仍用内置短句，不会在每次状态变化时去问模型。
-            要对她说话，用桌宠旁边的「说点什么...」。右键「对话」会把光标放进那一栏。托盘「试对话」发送「在吗」。
+            桌宠平时只留立绘和气泡。右键「对话」才弹出「说点什么...」，说完、按 Esc 或点外面都会收起。托盘「试对话」直接发送「在吗」，不把输入条留在桌面上。
             没打开、没填密钥或接口地址、或请求失败时，气泡改说「……这会儿说不了。」，工作状态不动。
             密钥只写在本机配置里。
           </p>

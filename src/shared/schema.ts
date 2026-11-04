@@ -4,7 +4,9 @@ import {
   DEFAULT_LLM_PROVIDER,
   FORM_IDS,
   FORM_SLOT,
+  THEME_IDS,
   isFormId,
+  isThemeId,
   type FormId,
   type Settings,
 } from "./types";
@@ -70,6 +72,7 @@ export const settingsSchema = z.object({
     model: z.string(),
     timeoutMs: z.number(),
   }),
+  theme: z.enum(THEME_IDS),
 });
 
 function clamp(n: number, min: number, max: number): number {
@@ -99,6 +102,7 @@ export function normalizeSettings(input: Settings): Settings {
   s.llm.apiKey = s.llm.apiKey.replace(/[\u0000\r\n]/g, "").trim().slice(0, 2000);
   s.llm.model = s.llm.model.trim().slice(0, 128);
   s.llm.timeoutMs = Math.round(clamp(s.llm.timeoutMs, 500, 120_000));
+  if (!isThemeId(s.theme)) s.theme = "warm";
 
   for (const id of FORM_IDS) {
     const slot = s.forms[id];
@@ -165,6 +169,7 @@ export function mergeSettings(base: Settings, input: unknown): Settings {
     if (typeof src.llm.model === "string") next.llm.model = src.llm.model;
     if (typeof src.llm.timeoutMs === "number") next.llm.timeoutMs = src.llm.timeoutMs;
   }
+  if (typeof src.theme === "string" && isThemeId(src.theme)) next.theme = src.theme;
   if (isRecord(src.forms)) {
     for (const id of FORM_IDS) {
       const patch = src.forms[id];
