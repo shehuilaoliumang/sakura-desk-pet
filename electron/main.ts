@@ -86,7 +86,7 @@ function createPetWindow(): void {
     alwaysOnTop: runtime.settings.window.alwaysOnTop,
     skipTaskbar: true,
     backgroundColor: "#00000000",
-    title: "樱",
+    title: "\u6a31",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -106,6 +106,9 @@ function createPetWindow(): void {
   petWin.webContents.on("did-fail-load", (_event, code, description, url) => {
     console.error(`[sakura-pet] failed to load ${url} ${code} ${description}`);
   });
+  petWin.setIgnoreMouseEvents(true, { forward: true });
+  petWin.setMinimumSize(Math.round(BASE_W * 0.4), Math.round(BASE_H * 0.4));
+  petWin.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
   petWin.once("ready-to-show", () => petWin?.show());
   petWin.on("closed", () => {
     petWin = null;
@@ -203,7 +206,7 @@ function ensureTray(): void {
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   );
   tray = new Tray(image.isEmpty() ? fallback : image);
-  tray.setToolTip("樱");
+  tray.setToolTip("\u6a31");
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "显示桌宠", click: () => { petWin?.show(); petWin?.focus(); } },
@@ -235,6 +238,11 @@ function wireIpc(): void {
   });
   ipcMain.on("sakura:open-settings", () => openSettings());
   ipcMain.on("sakura:quit", () => app.quit());
+  ipcMain.on("sakura:set-mouse-ignore", (event, ignore: unknown) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== petWin) return;
+    win.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
+  });
   ipcMain.on("sakura:reveal", (_event, target: unknown) => {
     if (!runtime) return;
     const config = runtime.getConfig();

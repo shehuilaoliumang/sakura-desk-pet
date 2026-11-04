@@ -17,4 +17,7 @@ contextBridge.exposeInMainWorld("sakuraPet", {
   reveal(target: "settings" | "pack") {
     ipcRenderer.send("sakura:reveal", target);
   },
+  setMouseIgnore(ignore: boolean) {
+    ipcRenderer.send("sakura:set-mouse-ignore", !!ignore);
+  },
 });

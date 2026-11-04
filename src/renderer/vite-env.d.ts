@@ -6,6 +6,7 @@ export interface SakuraPetBridge {
   openSettings(): void;
   quit(): void;
   reveal(target: "settings" | "pack"): void;
+  setMouseIgnore(ignore: boolean): void;
 }
 
 declare global {
