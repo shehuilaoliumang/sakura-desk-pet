@@ -3,39 +3,111 @@ import type { FormId, PetEvent, Settings, Speaker, SpeechLine } from "./types";
 type Tier = 0 | 1 | 2;
 
 const NORMAL: Record<PetEvent, [string, string, string]> = {
-  idle: ["……在的。", "{{honorific}}，我在这儿。", "{{honorific}}，我就在旁边。有事的话，小声叫我就好。"],
-  thinking: ["我想想。", "让我想一想，{{honorific}}。不会太久。", "请给我一点点时间，{{honorific}}。我想仔细一点，免得添麻烦。"],
-  working: ["我在做。", "我在做了，{{honorific}}。请稍等。", "正在做，{{honorific}}。做好了就告诉您。"],
-  waiting: ["我等着。", "我等着，{{honorific}}。不着急。", "我在等您，{{honorific}}。您先忙就好。"],
-  success: ["好了。", "做好了，{{honorific}}。太好了。", "做好了，{{honorific}}。没有添麻烦吧。"],
-  error: ["对不起。", "对不起，{{honorific}}。出了点问题。", "对不起，{{honorific}}。我再确认一次。"],
+  idle: [
+    "……我在的。不打扰。",
+    "{{honorific}}，我就在这儿。您不用特地看我。",
+    "{{honorific}}……我就在旁边。想起来的话，小声叫我就好。",
+  ],
+  thinking: [
+    "让我慢慢想。",
+    "让我想一想，{{honorific}}。不会让您等太久。",
+    "请给我一点点时间，{{honorific}}。我想仔细些，免得说错。",
+  ],
+  working: [
+    "我在做，等我一下。",
+    "{{honorific}}，请稍等。我想把它做好。",
+    "正在做，{{honorific}}。做好了，我就轻声告诉您。",
+  ],
+  waiting: [
+    "我等着，不急。",
+    "{{honorific}}，我不着急。您先忙就好。",
+    "我在等您，{{honorific}}。多久都没关系，请不要顾着我。",
+  ],
+  success: [
+    "好了……太好了。",
+    "做好了，{{honorific}}。您看这样可以吗。",
+    "做好了，{{honorific}}。没有添麻烦吧。我……有点高兴。",
+  ],
+  error: [
+    "对不起，是我。",
+    "对不起，{{honorific}}。是我这边出了问题。",
+    "对不起，{{honorific}}。我再确认一次，不会就这么算了。",
+  ],
 };
 
 const DARK_TITLED: Record<PetEvent, [string, string, string]> = {
-  idle: ["{{name}}。", "{{name}}，在。", "{{name}}。看也没用。"],
-  thinking: ["……{{name}}，等一下。", "{{name}}，在看。", "{{name}}。别打断。"],
-  working: ["{{name}}，做着。", "{{name}}，别催。", "{{name}}。催也快不了。"],
-  waiting: ["{{name}}，等你。", "急什么，{{name}}。", "{{name}}。站好就行。"],
-  success: ["成了，{{name}}。", "{{name}}，结束了。", "成了。{{name}}用不着道谢。"],
-  error: ["{{name}}，出岔子了。", "{{name}}。谁弄的。", "出错了，{{name}}。别装没看见。"],
+  idle: [
+    "{{name}}。我在这儿。",
+    "{{name}}。我在。没走开。",
+    "{{name}}。看也没用，我还在。",
+  ],
+  thinking: [
+    "……{{name}}。等一下。",
+    "{{name}}，让我静一静。",
+    "{{name}}。别打断。想完了再说。",
+  ],
+  working: [
+    "{{name}}，还在做。",
+    "{{name}}，别催。快不了的。",
+    "{{name}}。催也快不了。越催越乱。",
+  ],
+  waiting: [
+    "{{name}}，我等着。",
+    "急什么，{{name}}。我还在等。",
+    "{{name}}。急也没用。我守着。",
+  ],
+  success: [
+    "成了，{{name}}。",
+    "{{name}}。结束了。没什么好谢的。",
+    "成了。{{name}}用不着道谢。听见了。",
+  ],
+  error: [
+    "{{name}}，出岔子了。",
+    "{{name}}。谁弄的。……先别急着认。",
+    "出错了，{{name}}。别装没看见。",
+  ],
 };
 
 const DARK_DIRECT: Record<PetEvent, [string, string, string]> = {
-  idle: ["{{name}}。在。", "在。", "看什么。"],
-  thinking: ["等一下。", "在看。", "别打断。"],
-  working: ["做着。", "别催。", "催也快不了。"],
-  waiting: ["等你。", "急什么。", "站好就行。"],
-  success: ["成了。", "结束了。", "用不着谢。"],
-  error: ["出岔子了。", "谁弄的。", "出错了。别装没看见。"],
+  idle: [
+    "{{name}}。……我在。",
+    "我在。{{name}}，没走开。",
+    "看什么。{{name}}，我还在。",
+  ],
+  thinking: [
+    "等一下。{{name}}。",
+    "静一静。{{name}}。",
+    "别打断。{{name}}，还没想完。",
+  ],
+  working: [
+    "还在做。{{name}}。",
+    "别催。{{name}}，快不了。",
+    "催也快不了。{{name}}，越催越乱。",
+  ],
+  waiting: [
+    "等你。{{name}}。",
+    "急什么。{{name}}，我还在等。",
+    "急也没用。{{name}}，我守着。",
+  ],
+  success: [
+    "成了。{{name}}。",
+    "结束了。{{name}}，没什么好谢。",
+    "用不着谢。{{name}}，我听见了。",
+  ],
+  error: [
+    "出岔子了，{{name}}。",
+    "谁弄的。{{name}}，先别认。",
+    "出错了。别装没看见，{{name}}。",
+  ],
 };
 
 const ECHO: Record<PetEvent, [string, string]> = {
-  idle: ["……嗯。", "{{honorific}}，我在。"],
-  thinking: ["我也在想。", "让我想想，{{honorific}}。"],
-  working: ["请稍等。", "我在做了，{{honorific}}。"],
-  waiting: ["我不急。", "我等着，{{honorific}}。"],
-  success: ["太好了。", "做好了，{{honorific}}。"],
-  error: ["对不起。", "对不起，{{honorific}}。"],
+  idle: ["……嗯。我在。", "{{honorific}}，我陪着。"],
+  thinking: ["我也慢慢想。", "再想一下，{{honorific}}。"],
+  working: ["马上就好。", "我来做好，{{honorific}}。"],
+  waiting: ["我不急。", "我等您，{{honorific}}。"],
+  success: ["……太好了。", "做好了，{{honorific}}。太好了。"],
+  error: ["是我不好。", "对不起，{{honorific}}。"],
 };
 
 function clampTier(n: number): Tier {
