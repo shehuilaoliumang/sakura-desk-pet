@@ -132,14 +132,39 @@ async function main(): Promise<void> {
     assert(state.sections.workStatus.data.state === "idle", "cleared to idle");
     assert(state.sections.config.data.activeForm === "duo", "clear keeps the form");
 
-    const reloaded = JSON.parse(fs.readFileSync(path.join(dataDir, "settings.json"), "utf8")) as Settings;
+    const settingsBytes = fs.readFileSync(path.join(dataDir, "settings.json"));
+    assert(settingsBytes[0] === 0x7b, "settings.json starts with '{' (UTF-8, not a UTF-16 BOM)");
+    assert(settingsBytes.includes(Buffer.from("笨蛋", "utf8")), "taboo stored as UTF-8 bytes");
+    const reloaded = JSON.parse(settingsBytes.toString("utf8")) as Settings;
     assert(reloaded.honorific === "老板", "honorific persisted");
     assert(reloaded.tabooWords.includes("笨蛋"), "taboo persisted");
+
+    const utfDir = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-pet-utf8-"));
+    const utfRuntime = new PetRuntime({ dataDir: utfDir, appRoot });
+    utfRuntime.load();
+    const utfBytes = fs.readFileSync(utfRuntime.settingsPath);
+    assert(utfBytes.includes(Buffer.from("常态樱", "utf8")), "default displayName is UTF-8");
+    assert(utfBytes.includes(Buffer.from("前辈", "utf8")), "default honorific is UTF-8");
+    assert(utfRuntime.settings.forms.normal.displayName === "常态樱", "default displayName is 常态樱");
+    assert(utfRuntime.settings.honorific === "前辈", "default honorific is 前辈");
+    utfRuntime.dispose();
+
+    const utf16Dir = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-pet-utf16-"));
+    const utf16Body = Buffer.from(JSON.stringify({ honorific: "前辈", schemaVersion: 1 }), "utf16le");
+    fs.writeFileSync(path.join(utf16Dir, "settings.json"), Buffer.concat([Buffer.from([0xff, 0xfe]), utf16Body]));
+    const utf16Runtime = new PetRuntime({ dataDir: utf16Dir, appRoot });
+    utf16Runtime.load();
+    assert(utf16Runtime.settings.forms.normal.displayName === "常态樱", "UTF-16 settings fall back to defaults");
+    assert(Boolean(utf16Runtime.warning?.includes("UTF-8")), "UTF-16 file is reported");
+    utf16Runtime.dispose();
+    fs.rmSync(utfDir, { recursive: true, force: true });
+    fs.rmSync(utf16Dir, { recursive: true, force: true });
 
     const bootDir = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-pet-boot-"));
     fs.writeFileSync(
       path.join(bootDir, "settings.json"),
       JSON.stringify({ honorific: "老板", defaultForm: "duo", activeForm: "dark", schemaVersion: 1 }),
+      { encoding: "utf8" },
     );
     const boot = new PetRuntime({ dataDir: bootDir, appRoot });
     boot.load();

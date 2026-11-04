@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+import type { PetLayoutEvent } from "../shared/screenLayout";
+
 export type PreparedMenu = {
   side: "left" | "right" | "top" | "bottom";
   menu: { x: number; y: number };
@@ -10,8 +12,8 @@ export type PreparedMenu = {
 };
 
 export interface SakuraPetBridge {
-  moveBy(dx: number, dy: number): void;
-  moveEnd(): void;
+  beginDrag(): void;
+  endDrag(): void;
   openSettings(): void;
   quit(): void;
   reveal(target: "settings" | "pack"): void;
@@ -19,6 +21,8 @@ export interface SakuraPetBridge {
   getWorkArea?(): Promise<unknown>;
   prepareMenu?(size?: { width?: number; height?: number; prefer?: string }): Promise<PreparedMenu | null>;
   restoreMenu?(): Promise<boolean>;
+  getLayout?(): Promise<PetLayoutEvent | null>;
+  onLayout?(listener: (layout: PetLayoutEvent) => void): () => void;
 }
 
 declare global {

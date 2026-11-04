@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { PetLayoutEvent } from "../src/shared/screenLayout";
 
 export type PreparedMenu = {
   side: "left" | "right" | "top" | "bottom";
@@ -10,12 +11,11 @@ export type PreparedMenu = {
 };
 
 contextBridge.exposeInMainWorld("sakuraPet", {
-  moveBy(dx: number, dy: number) {
-    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    ipcRenderer.send("sakura:move-by", { dx, dy });
+  beginDrag() {
+    ipcRenderer.send("sakura:drag-start");
   },
-  moveEnd() {
-    ipcRenderer.send("sakura:move-end");
+  endDrag() {
+    ipcRenderer.send("sakura:drag-end");
   },
   openSettings() {
     ipcRenderer.send("sakura:open-settings");
@@ -37,5 +37,13 @@ contextBridge.exposeInMainWorld("sakuraPet", {
   },
   restoreMenu() {
     return ipcRenderer.invoke("sakura:restore-menu") as Promise<boolean>;
+  },
+  getLayout() {
+    return ipcRenderer.invoke("sakura:get-layout") as Promise<PetLayoutEvent | null>;
+  },
+  onLayout(listener: (layout: PetLayoutEvent) => void) {
+    const wrapped = (_event: unknown, layout: PetLayoutEvent) => listener(layout);
+    ipcRenderer.on("sakura:layout", wrapped);
+    return () => ipcRenderer.removeListener("sakura:layout", wrapped);
   },
 });

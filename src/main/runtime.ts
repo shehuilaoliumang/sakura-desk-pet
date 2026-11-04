@@ -18,7 +18,7 @@ import type {
   Speaker,
   WorkStatusData,
 } from "../shared/types";
-import { isFormId } from "../shared/types";
+import { FORM_IDS, isFormId } from "../shared/types";
 import { clipLoop, resolvePack } from "./pack";
 
 interface Leaf<T> {
@@ -71,22 +71,25 @@ export class PetRuntime extends EventEmitter {
     fs.mkdirSync(this.opts.dataDir, { recursive: true });
     if (fs.existsSync(this.settingsPath)) {
       try {
-        const parsed = JSON.parse(fs.readFileSync(this.settingsPath, "utf8")) as unknown;
+        const parsed = JSON.parse(readSettingsUtf8(this.settingsPath)) as unknown;
         const result = parseSettings(parsed);
         if (!result.ok) {
           this.warning = `配置无法读取，已改用默认并备份。${result.issues.join("；")}`;
-          const bak = `${this.settingsPath}.${Date.now()}.bak`;
-          try {
-            fs.copyFileSync(this.settingsPath, bak);
-          } catch {
-            // keep going with defaults
-          }
+          this.backupSettings();
           this.settings = defaultSettings();
         } else {
           this.settings = result.settings;
+          const corrupt = corruptSettingsText(this.settings);
+          if (corrupt) {
+            this.warning = corrupt;
+            console.warn(`[sakura-pet] ${corrupt}`);
+          }
         }
-      } catch {
-        this.warning = "配置不是合法 JSON，已改用默认。";
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "配置不是合法 JSON";
+        this.warning = detail.includes("UTF-8") ? `${detail} 已改用默认并备份。` : "配置不是合法 JSON，已改用默认并备份。";
+        console.warn(`[sakura-pet] ${this.warning}`);
+        this.backupSettings();
         this.settings = defaultSettings();
       }
     } else {
@@ -416,8 +419,17 @@ export class PetRuntime extends EventEmitter {
     fs.mkdirSync(this.opts.dataDir, { recursive: true });
     const text = `${JSON.stringify(this.settings, null, 2)}\n`;
     const tmp = `${this.settingsPath}.tmp`;
-    fs.writeFileSync(tmp, text);
+    fs.writeFileSync(tmp, text, { encoding: "utf8" });
     fs.renameSync(tmp, this.settingsPath);
+  }
+
+  private backupSettings(): void {
+    const bak = `${this.settingsPath}.${Date.now()}.bak`;
+    try {
+      fs.copyFileSync(this.settingsPath, bak);
+    } catch {
+      // keep going with defaults
+    }
   }
 
   private serialized(): string {
@@ -440,7 +452,7 @@ export class PetRuntime extends EventEmitter {
   private reloadFromDisk(): void {
     let text = "";
     try {
-      text = fs.readFileSync(this.settingsPath, "utf8");
+      text = readSettingsUtf8(this.settingsPath);
     } catch {
       return;
     }
@@ -489,4 +501,28 @@ function blankSay(form: FormId, event: PetEvent): SayData {
 
 function blankAnim(form: FormId, name: PetEvent, playbackId: string): AnimData {
   return { name, form, playbackId, facing: null, loop: true, url: null };
+}
+
+/** settings.json is UTF-8. UTF-16 (PowerShell's default) must not be decoded as text. */
+export function readSettingsUtf8(filePath: string): string {
+  const buf = fs.readFileSync(filePath);
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+    throw new Error("settings.json 是 UTF-16 LE，必须保存为 UTF-8");
+  }
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    throw new Error("settings.json 是 UTF-16 BE，必须保存为 UTF-8");
+  }
+  const text = buf.toString("utf8");
+  if (text.includes("\uFFFD")) {
+    throw new Error("settings.json 不是合法 UTF-8");
+  }
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+/** Mojibake left by a lossy round-trip, e.g. 常态樱 → 甯告€佹ū. */
+export function corruptSettingsText(settings: Settings): string | null {
+  const samples = [settings.honorific, settings.nickname, ...FORM_IDS.map((id) => settings.forms[id].displayName)];
+  const bad = samples.some((value) => value.includes("\uFFFD") || value.includes("€") || value.includes("甯告"));
+  if (!bad) return null;
+  return "settings.json 中文已损坏，文件必须是 UTF-8（例如「常态樱」「前辈」）。不要用 PowerShell 默认编码重写它。";
 }
