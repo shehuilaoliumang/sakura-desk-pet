@@ -32,8 +32,8 @@ export async function putSettings(settings: Settings): Promise<ConfigResponse | 
 
 
 export async function putWindowScale(scale: number): Promise<ConfigResponse | { ok: false; reason?: string; issues?: string[] }> {
-  const response = await fetch(/pet/config, {
-    method: PUT,
+  const response = await fetch("/pet/config", {
+    method: "PUT",
     headers: userHeaders,
     body: JSON.stringify({ window: { scale } }),
   });

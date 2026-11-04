@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { app, BrowserWindow, ipcMain, screen, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
 import { dataDir } from "../src/main/paths";
 import { PetRuntime, type ChangeReason } from "../src/main/runtime";
 import { startServer } from "../src/main/server";
@@ -17,6 +17,7 @@ let runtime: PetRuntime | null = null;
 let server: http.Server | null = null;
 let petWin: BrowserWindow | null = null;
 let settingsWin: BrowserWindow | null = null;
+let tray: Tray | null = null;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -83,7 +84,7 @@ function createPetWindow(): void {
     resizable: false,
     hasShadow: false,
     alwaysOnTop: runtime.settings.window.alwaysOnTop,
-    skipTaskbar: false,
+    skipTaskbar: true,
     backgroundColor: "#00000000",
     title: "樱",
     webPreferences: {
@@ -189,6 +190,32 @@ function applyChrome(place: boolean): void {
   petWin.setSize(w, h);
   petWin.setAlwaysOnTop(settingsWin?.isFocused() ? false : runtime.settings.window.alwaysOnTop, "screen-saver");
   if (place) placePet(true);
+}
+
+
+function ensureTray(): void {
+  if (tray) return;
+  const iconPath = path.join(appRoot(), "assets", "icon.png");
+  const image = fs.existsSync(iconPath)
+    ? nativeImage.createFromPath(iconPath)
+    : nativeImage.createEmpty();
+  const fallback = nativeImage.createFromDataURL(
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  );
+  tray = new Tray(image.isEmpty() ? fallback : image);
+  tray.setToolTip("樱");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "显示桌宠", click: () => { petWin?.show(); petWin?.focus(); } },
+      { label: "设置", click: () => openSettings() },
+      { type: "separator" },
+      { label: "退出", click: () => app.quit() },
+    ]),
+  );
+  tray.on("double-click", () => {
+    petWin?.show();
+    petWin?.focus();
+  });
 }
 
 function wireIpc(): void {
