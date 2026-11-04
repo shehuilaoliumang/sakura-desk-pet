@@ -113,7 +113,7 @@ export function PetApp() {
     };
   }, []);
 
-  if (!settings || !state || !work) {  if (!settings || !state || !work) {
+  if (!settings || !state || !work) {
     return (
       <div className="pet-root loading">
         <div className="boot-card" data-no-drag data-hit>
