@@ -20,4 +20,10 @@ contextBridge.exposeInMainWorld("sakuraPet", {
   setMouseIgnore(ignore: boolean) {
     ipcRenderer.send("sakura:set-mouse-ignore", !!ignore);
   },
+  getWorkArea() {
+    return ipcRenderer.invoke("sakura:work-area") as Promise<{
+      workArea: { x: number; y: number; width: number; height: number };
+      bounds: { x: number; y: number; width: number; height: number };
+    } | null>;
+  },
 });

@@ -13,9 +13,9 @@ const WINDOW_MARGIN_RATIO = 0.5;
 function petWindowSize(scale: number): { width: number; height: number; contentW: number; contentH: number; side: number; top: number; bottom: number } {
   const contentW = Math.round(BASE_W * scale);
   const contentH = Math.round(BASE_H * scale);
-  const side = Math.max(96, Math.round(contentW * WINDOW_MARGIN_RATIO));
-  const top = Math.max(72, Math.round(side * 0.7));
-  const bottom = Math.max(36, Math.round(side * 0.35));
+  const side = Math.max(200, Math.round(contentW * WINDOW_MARGIN_RATIO));
+  const top = Math.max(96, Math.round(side * 0.55));
+  const bottom = Math.max(48, Math.round(side * 0.3));
   return {
     contentW,
     contentH,
@@ -260,6 +260,13 @@ function wireIpc(): void {
   });
   ipcMain.on("sakura:open-settings", () => openSettings());
   ipcMain.on("sakura:quit", () => app.quit());
+  ipcMain.handle("sakura:work-area", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return null;
+    const area = screen.getDisplayMatching(win.getBounds()).workArea;
+    const b = win.getBounds();
+    return { workArea: area, bounds: b };
+  });
   ipcMain.on("sakura:set-mouse-ignore", (event, ignore: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== petWin) return;

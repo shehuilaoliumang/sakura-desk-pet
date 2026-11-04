@@ -167,7 +167,12 @@ export function PetApp() {
       onContextMenu={(event) => {
         event.preventDefault();
         const stage = stageRef.current?.getBoundingClientRect();
-        setMenu(placeContextMenu(event.clientX, event.clientY, stage));
+        const cx = event.clientX;
+        const cy = event.clientY;
+        void (async () => {
+          const geo = (await window.sakuraPet?.getWorkArea?.()) ?? null;
+          setMenu(placeContextMenu(cx, cy, stage, geo));
+        })();
       }}
     >
       <div className={`bubbles count-${bubbleCols(activeForm, lines.length, settings.window.scale)}`} data-hit>
@@ -238,27 +243,84 @@ export function PetApp() {
 
 
 
-/** dsh-pet style: dock beside the figure, clamp into window∩viewport; do not cover the stage when space exists. */
+/** Prefer the side of the figure with real screen room (dsh-pet: clamp to window ∩ work area). */
 function placeContextMenu(
   clickX: number,
   clickY: number,
   stage: DOMRect | undefined,
+  geo: {
+    workArea: { x: number; y: number; width: number; height: number };
+    bounds: { x: number; y: number; width: number; height: number };
+  } | null,
   menuW = 188,
   menuH = 240,
 ): { x: number; y: number; side: string } {
-  const gap = 6;
-  const clamp = { x: 4, y: 4, w: window.innerWidth - 8, h: window.innerHeight - 8 };
+  const gap = 8;
+  const winX = geo?.bounds.x ?? window.screenX;
+  const winY = geo?.bounds.y ?? window.screenY;
+  const area = geo?.workArea ?? {
+    x: window.screen.availLeft,
+    y: window.screen.availTop,
+    width: window.screen.availWidth,
+    height: window.screen.availHeight,
+  };
+  // Visible clamp in client coords = window ∩ workArea (same idea as dsh-pet visibleClampRect)
+  const vx0 = Math.max(0, area.x - winX);
+  const vy0 = Math.max(0, area.y - winY);
+  const vx1 = Math.min(window.innerWidth, area.x + area.width - winX);
+  const vy1 = Math.min(window.innerHeight, area.y + area.height - winY);
+  const clamp = {
+    x: Math.max(4, vx0 + 4),
+    y: Math.max(4, vy0 + 4),
+    w: Math.max(40, vx1 - vx0 - 8),
+    h: Math.max(40, vy1 - vy0 - 8),
+  };
   const clampX = (v: number) => Math.max(clamp.x, Math.min(v, Math.max(clamp.x, clamp.x + clamp.w - menuW)));
   const clampY = (v: number) => Math.max(clamp.y, Math.min(v, Math.max(clamp.y, clamp.y + clamp.h - menuH)));
+
   const anchor = stage ?? new DOMRect(clickX - 40, clickY - 40, 80, 80);
-  const cands: { side: string; x: number; y: number; score: number }[] = [
-    { side: "right", x: anchor.right + gap, y: clickY - 12, score: clamp.x + clamp.w - (anchor.right + gap) },
-    { side: "left", x: anchor.left - gap - menuW, y: clickY - 12, score: anchor.left - clamp.x - menuW },
-    { side: "bottom", x: anchor.left, y: anchor.bottom + gap, score: clamp.y + clamp.h - (anchor.bottom + gap) },
-    { side: "top", x: anchor.left, y: anchor.top - gap - menuH, score: anchor.top - clamp.y - menuH },
+  const cands = [
+    { side: "right", x: anchor.right + gap, y: Math.min(Math.max(anchor.top, clickY - 24), anchor.bottom - 48) },
+    { side: "left", x: anchor.left - gap - menuW, y: Math.min(Math.max(anchor.top, clickY - 24), anchor.bottom - 48) },
+    { side: "bottom", x: anchor.left + (anchor.width - menuW) / 2, y: anchor.bottom + gap },
+    { side: "top", x: anchor.left + (anchor.width - menuW) / 2, y: anchor.top - gap - menuH },
   ];
-  cands.sort((a, b) => b.score - a.score);
-  const best = cands.find((c) => c.score >= menuW * 0.35) ?? cands[0];
+
+  const screenFit = (x: number, y: number) => {
+    const sx = winX + x;
+    const sy = winY + y;
+    const left = Math.max(sx, area.x);
+    const top = Math.max(sy, area.y);
+    const right = Math.min(sx + menuW, area.x + area.width);
+    const bottom = Math.min(sy + menuH, area.y + area.height);
+    return Math.max(0, right - left) * Math.max(0, bottom - top) / (menuW * menuH);
+  };
+  const overlapStage = (x: number, y: number) => {
+    const left = Math.max(x, anchor.left);
+    const top = Math.max(y, anchor.top);
+    const right = Math.min(x + menuW, anchor.right);
+    const bottom = Math.min(y + menuH, anchor.bottom);
+    return Math.max(0, right - left) * Math.max(0, bottom - top) / (menuW * menuH);
+  };
+  // Screen room outside the figure on that side (why "贴右就弹左")
+  const sideRoom = {
+    right: (area.x + area.width) - (winX + anchor.right),
+    left: (winX + anchor.left) - area.x,
+    bottom: (area.y + area.height) - (winY + anchor.bottom),
+    top: (winY + anchor.top) - area.y,
+  } as Record<string, number>;
+
+  const ranked = cands
+    .map((c) => {
+      const fit = screenFit(c.x, c.y);
+      const overlap = overlapStage(c.x, c.y);
+      const room = sideRoom[c.side] ?? 0;
+      const score = fit * 4 + Math.min(room, 400) / 100 - overlap * 5;
+      return { ...c, score, fit, overlap, room };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const best = ranked.find((c) => c.fit >= 0.85 && c.overlap < 0.25) ?? ranked[0];
   return { x: clampX(best.x), y: clampY(best.y), side: best.side };
 }
 

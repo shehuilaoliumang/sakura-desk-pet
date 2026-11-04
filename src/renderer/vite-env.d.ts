@@ -7,6 +7,10 @@ export interface SakuraPetBridge {
   quit(): void;
   reveal(target: "settings" | "pack"): void;
   setMouseIgnore(ignore: boolean): void;
+  getWorkArea?(): Promise<{
+    workArea: { x: number; y: number; width: number; height: number };
+    bounds: { x: number; y: number; width: number; height: number };
+  } | null>;
 }
 
 declare global {
