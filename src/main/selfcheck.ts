@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PetRuntime } from "./runtime";
 import { startServer } from "./server";
+import { selfCheckScreenGeometry } from "../shared/screenGeometry";
 import type { PublicState, Settings } from "../shared/types";
 
 const appRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -13,6 +14,7 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 async function main(): Promise<void> {
+  selfCheckScreenGeometry();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-pet-"));
   const runtime = new PetRuntime({ dataDir, appRoot });
   runtime.load();

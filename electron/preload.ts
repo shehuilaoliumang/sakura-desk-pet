@@ -10,12 +10,16 @@ export type PreparedMenu = {
 };
 
 contextBridge.exposeInMainWorld("sakuraPet", {
-  moveBy(dx: number, dy: number) {
-    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    ipcRenderer.send("sakura:move-by", { dx, dy });
+  dragStart() {
+    return ipcRenderer.invoke("sakura:drag-start") as Promise<boolean>;
   },
-  moveEnd() {
-    ipcRenderer.send("sakura:move-end");
+  dragEnd() {
+    return ipcRenderer.invoke("sakura:drag-end") as Promise<{ moved: boolean }>;
+  },
+  onDragFinished(listener: (result: { moved: boolean }) => void) {
+    const wrapped = (_event: unknown, result: { moved: boolean }) => listener(result ?? { moved: false });
+    ipcRenderer.on("sakura:drag-finished", wrapped);
+    return () => ipcRenderer.removeListener("sakura:drag-finished", wrapped);
   },
   openSettings() {
     ipcRenderer.send("sakura:open-settings");

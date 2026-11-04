@@ -16,6 +16,16 @@ export function PetApp() {
   const scaleRef = useRef(1);
   const zoomTimer = useRef<number | null>(null);
   const hintTimer = useRef<number | null>(null);
+  const draggingRef = useRef(false);
+  const ignoreRef = useRef(true);
+  const settleDragRef = useRef<(() => void) | null>(null);
+  const commitIgnoreRef = useRef<(ignore: boolean) => void>(() => {});
+  commitIgnoreRef.current = (ignore: boolean) => {
+    if (!window.sakuraPet?.setMouseIgnore) return;
+    if (ignoreRef.current === ignore) return;
+    ignoreRef.current = ignore;
+    window.sakuraPet.setMouseIgnore(ignore);
+  };
 
   const settings = backend.settings;
   const state = backend.state;
@@ -100,26 +110,31 @@ export function PetApp() {
 
   useEffect(() => {
     if (!window.sakuraPet?.setMouseIgnore) return;
-    let last = true;
-    const apply = (ignore: boolean) => {
-      if (ignore === last) return;
-      last = ignore;
-      window.sakuraPet?.setMouseIgnore(ignore);
-    };
     const onMove = (event: MouseEvent) => {
+      if (draggingRef.current) return;
       const el = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
-      const hit = !!(el && el.closest("[data-hit]"));
-      apply(!hit);
+      commitIgnoreRef.current(!(el && el.closest("[data-hit]")));
     };
-    const onLeave = () => apply(true);
+    const onLeave = () => {
+      // Crossing a display edge synthesizes mouseleave. Re-enabling click-through
+      // there sets WS_EX_TRANSPARENT and the OS drops the drag capture.
+      if (draggingRef.current) return;
+      commitIgnoreRef.current(true);
+    };
     window.addEventListener("mousemove", onMove);
     document.documentElement.addEventListener("mouseleave", onLeave);
-    apply(true);
+    commitIgnoreRef.current(true);
     return () => {
       window.removeEventListener("mousemove", onMove);
       document.documentElement.removeEventListener("mouseleave", onLeave);
-      apply(true);
+      commitIgnoreRef.current(true);
     };
+  }, []);
+
+  useEffect(() => {
+    return window.sakuraPet?.onDragFinished?.(() => {
+      settleDragRef.current?.();
+    });
   }, []);
 
   if (!settings || !state || !work) {
@@ -137,30 +152,59 @@ export function PetApp() {
   const lines = say?.lines ?? [];
   const enabled = FORM_IDS.filter((id) => settings.forms[id].enabled);
 
-  const onPointerDown = (event: ReactPointerEvent) => {
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-    if ((event.target as HTMLElement).closest("[data-no-drag]")) return;
-    let lastX = event.screenX;
-    let lastY = event.screenY;
-    let moved = false;
-    const move = (ev: PointerEvent) => {
-      const dx = ev.screenX - lastX;
-      const dy = ev.screenY - lastY;
-      lastX = ev.screenX;
-      lastY = ev.screenY;
-      if (dx || dy) moved = true;
-      window.sakuraPet?.moveBy(dx, dy);
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+    const target = event.target as HTMLElement | null;
+    if (!target || target.closest("[data-no-drag]")) return;
+    const hit = target.closest("[data-hit]");
+    if (!hit) return;
+
+    let settled = false;
+    let clientX = event.clientX;
+    let clientY = event.clientY;
+    const pointerId = event.pointerId;
+    const finish = (x: number, y: number) => {
+      if (settled) return;
+      settled = true;
+      settleDragRef.current = null;
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("pointercancel", onUp, true);
       setPressed(false);
-      if (moved) window.sakuraPet?.moveEnd();
-      else setReaction(true);
+      const apply = (moved: boolean) => {
+        draggingRef.current = false;
+        try {
+          if (hit.hasPointerCapture(pointerId)) hit.releasePointerCapture(pointerId);
+        } catch {
+          /* capture already released */
+        }
+        const el = document.elementFromPoint(x, y) as HTMLElement | null;
+        commitIgnoreRef.current(!(el && el.closest("[data-hit]")));
+        if (!moved) setReaction(true);
+      };
+      const bridge = window.sakuraPet;
+      if (bridge?.dragEnd) void bridge.dragEnd().then((result) => apply(Boolean(result?.moved))).catch(() => apply(false));
+      else apply(false);
     };
+    const onMove = (ev: PointerEvent) => {
+      clientX = ev.clientX;
+      clientY = ev.clientY;
+    };
+    const onUp = (ev: PointerEvent) => finish(ev.clientX, ev.clientY);
+
+    draggingRef.current = true;
+    settleDragRef.current = () => finish(clientX, clientY);
+    commitIgnoreRef.current(false);
+    try {
+      hit.setPointerCapture(pointerId);
+    } catch {
+      /* the main process still follows screen.getCursorScreenPoint */
+    }
     setPressed(true);
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener("pointermove", onMove, true);
+    window.addEventListener("pointerup", onUp, true);
+    window.addEventListener("pointercancel", onUp, true);
+    void window.sakuraPet?.dragStart?.();
   };
 
   return (

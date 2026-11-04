@@ -4,28 +4,16 @@ import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } f
 import { dataDir } from "../src/main/paths";
 import { PetRuntime, type ChangeReason } from "../src/main/runtime";
 import { startServer } from "../src/main/server";
+import {
+  figureRect,
+  passedDragSlop,
+  petWindowSize,
+  positionForCursor,
+  rectAtPoint,
+  releaseWindow,
+  type Rect,
+} from "../src/shared/screenGeometry";
 import type http from "node:http";
-
-const BASE_W = 360;
-const BASE_H = 520;
-/** Match dsh-pet: window keeps side chrome so menus/bubbles fit without covering the figure. */
-const WINDOW_MARGIN_RATIO = 0.5;
-function petWindowSize(scale: number): { width: number; height: number; contentW: number; contentH: number; side: number; top: number; bottom: number } {
-  const contentW = Math.round(BASE_W * scale);
-  const contentH = Math.round(BASE_H * scale);
-  const side = Math.max(200, Math.round(contentW * WINDOW_MARGIN_RATIO));
-  const top = Math.max(56, Math.round(side * 0.28));
-  const bottom = Math.max(40, Math.round(side * 0.22));
-  return {
-    contentW,
-    contentH,
-    side,
-    top,
-    bottom,
-    width: contentW + side * 2,
-    height: contentH + top + bottom,
-  };
-}
 
 app.setName("sakura-pet");
 app.setPath("userData", dataDir());
@@ -38,6 +26,24 @@ let settingsWin: BrowserWindow | null = null;
 let tray: Tray | null = null;
 /** While the context menu is open, window is expanded; content origin stays fixed on screen. */
 let menuChrome: { x: number; y: number; width: number; height: number } | null = null;
+/**
+ * Absolute cursor-follow drag. Offset is captured once, in DIP, from
+ * `getCursorScreenPoint` and `getPosition` together — never from renderer
+ * `screenX` deltas, which jump when the window and the cursor disagree about
+ * scale factor at a monitor edge.
+ */
+type DragSession = {
+  originX: number;
+  originY: number;
+  grabX: number;
+  grabY: number;
+  width: number;
+  height: number;
+  moved: boolean;
+  timer: NodeJS.Timeout;
+};
+let dragSession: DragSession | null = null;
+let dragCompletion: { moved: boolean } | null = null;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -104,6 +110,10 @@ function createPetWindow(): void {
     frame: false,
     transparent: true,
     resizable: false,
+    // Default WS_THICKFRAME gives a frameless window an invisible resize border.
+    // On Windows that border snaps and resists at work-area edges and bezels,
+    // which reads as the pet hitting a wall before the art does.
+    thickFrame: false,
     hasShadow: false,
     alwaysOnTop: runtime.settings.window.alwaysOnTop,
     skipTaskbar: true,
@@ -118,7 +128,9 @@ function createPetWindow(): void {
     },
   });
   petWin.setMenuBarVisibility(false);
-  petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
+  // The window is not user-resizable. A large minimum tracking size makes
+  // Windows refuse SetWindowPos onto a narrower / negative-X monitor.
+  petWin.setMinimumSize(1, 1);
   placePet(true);
   const dev = rendererUrl("/pet");
   if (dev) void petWin.loadURL(dev);
@@ -130,10 +142,14 @@ function createPetWindow(): void {
     console.error(`[sakura-pet] failed to load ${url} ${code} ${description}`);
   });
   petWin.setIgnoreMouseEvents(true, { forward: true });
-  petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
   petWin.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
+  installDragEndHook(petWin);
   petWin.once("ready-to-show", () => petWin?.show());
   petWin.on("closed", () => {
+    if (dragSession) {
+      clearInterval(dragSession.timer);
+      dragSession = null;
+    }
     petWin = null;
     app.quit();
   });
@@ -191,64 +207,17 @@ function openSettings(): void {
   });
 }
 
-type Rect = { x: number; y: number; width: number; height: number };
-
 function workAreas(): Rect[] {
-  return screen.getAllDisplays().map((d) => ({ ...d.workArea }));
+  return screen.getAllDisplays().map((display) => ({ ...display.workArea }));
 }
 
-function pointInRect(r: Rect, x: number, y: number): boolean {
-  return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
-}
-
-function rectAtPoint(rects: Rect[], x: number, y: number): Rect | null {
-  for (const r of rects) if (pointInRect(r, x, y)) return r;
-  return null;
-}
-
-function distToRectSq(r: Rect, x: number, y: number): number {
-  const dx = Math.max(r.x - x, 0, x - (r.x + r.width));
-  const dy = Math.max(r.y - y, 0, y - (r.y + r.height));
-  return dx * dx + dy * dy;
-}
-
-function nearestRect(rects: Rect[], x: number, y: number): Rect | null {
-  let best: Rect | null = null;
-  let bestD = Infinity;
-  for (const r of rects) {
-    const d = distToRectSq(r, x, y);
-    if (d < bestD) {
-      bestD = d;
-      best = r;
-    }
+function placeAt(win: BrowserWindow, x: number, y: number, width: number, height: number): void {
+  const bounds = win.getBounds();
+  if (bounds.width !== width || bounds.height !== height) {
+    win.setBounds({ x, y, width, height });
+  } else if (bounds.x !== x || bounds.y !== y) {
+    win.setPosition(x, y);
   }
-  return best;
-}
-
-/** Keep a point inside the union of work areas (snap to nearest screen if in a gap). */
-function clampPointToDisplays(x: number, y: number): { x: number; y: number } {
-  const areas = workAreas();
-  if (areas.length === 0) return { x, y };
-  if (rectAtPoint(areas, x, y)) return { x, y };
-  const r = nearestRect(areas, x, y);
-  if (!r) return { x, y };
-  return {
-    x: Math.min(Math.max(x, r.x), r.x + r.width - 1),
-    y: Math.min(Math.max(y, r.y), r.y + r.height - 1),
-  };
-}
-
-/** Keep pet window center on some display; margins may overhang into bezels. */
-function clampPetOrigin(origin: Rect): Rect {
-  const cx = origin.x + origin.width / 2;
-  const cy = origin.y + origin.height / 2;
-  const c = clampPointToDisplays(cx, cy);
-  return {
-    x: Math.round(c.x - origin.width / 2),
-    y: Math.round(c.y - origin.height / 2),
-    width: origin.width,
-    height: origin.height,
-  };
 }
 
 function placePet(force: boolean): void {
@@ -273,6 +242,8 @@ function placePet(force: boolean): void {
 function applyChrome(place: boolean): void {
   if (!runtime || !petWin) return;
   const size = petWindowSize(runtime.settings.window.scale);
+  petWin.setAlwaysOnTop(settingsWin?.isFocused() ? false : runtime.settings.window.alwaysOnTop, "screen-saver");
+  if (dragSession) return;
   if (menuChrome) {
     // keep expanded shell; refresh content origin size bookkeeping
     menuChrome = { x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height };
@@ -280,8 +251,7 @@ function applyChrome(place: boolean): void {
   }
   const [x, y] = petWin.getPosition();
   petWin.setBounds({ x, y, width: size.width, height: size.height });
-  petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
-  petWin.setAlwaysOnTop(settingsWin?.isFocused() ? false : runtime.settings.window.alwaysOnTop, "screen-saver");
+  petWin.setMinimumSize(1, 1);
   if (place) placePet(true);
 }
 
@@ -311,16 +281,141 @@ function ensureTray(): void {
   });
 }
 
+function contentRectFor(bounds: Rect, windowOriginAtDragStart?: { x: number; y: number }): Rect {
+  if (!runtime) return bounds;
+  const size = petWindowSize(runtime.settings.window.scale);
+  if (!menuChrome || !windowOriginAtDragStart) {
+    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+  }
+  return {
+    x: menuChrome.x + (bounds.x - windowOriginAtDragStart.x),
+    y: menuChrome.y + (bounds.y - windowOriginAtDragStart.y),
+    width: size.width,
+    height: size.height,
+  };
+}
+
+function snapReleasedWindow(
+  win: BrowserWindow,
+  windowOriginAtDragStart: { x: number; y: number } | undefined,
+  forcePersist: boolean,
+): void {
+  if (!runtime) return;
+  const bounds = win.getBounds();
+  const size = petWindowSize(runtime.settings.window.scale);
+  const content = contentRectFor(bounds, windowOriginAtDragStart);
+  const figure = figureRect(content, size);
+  const released = releaseWindow(bounds, content, figure, workAreas());
+  const moved = released.window.x !== bounds.x || released.window.y !== bounds.y;
+  if (moved) placeAt(win, released.window.x, released.window.y, bounds.width, bounds.height);
+  if (menuChrome) {
+    menuChrome = {
+      x: released.content.x,
+      y: released.content.y,
+      width: size.width,
+      height: size.height,
+    };
+  }
+  if (!forcePersist && !moved) return;
+  if (menuChrome) runtime.setWindowPosition(menuChrome.x, menuChrome.y);
+  else {
+    const [x, y] = win.getPosition();
+    runtime.setWindowPosition(x, y);
+  }
+}
+
+function applyDragFrame(): void {
+  const session = dragSession;
+  const win = petWin;
+  if (!session || !win || win.isDestroyed()) return;
+  const cursor = screen.getCursorScreenPoint();
+  const next = positionForCursor(
+    { x: session.originX, y: session.originY },
+    { x: session.grabX, y: session.grabY },
+    cursor,
+  );
+  if (!session.moved) {
+    if (!passedDragSlop(next.x - session.originX, next.y - session.originY)) return;
+    session.moved = true;
+  }
+  // Re-assert the grabbed DIP size. A per-monitor DPI change sends a suggested
+  // rect that would otherwise resize the window as it crosses the bezel.
+  placeAt(win, next.x, next.y, session.width, session.height);
+}
+
+function finishDrag(notify = true): { moved: boolean } {
+  const session = dragSession;
+  if (!session) return dragCompletion ?? { moved: false };
+  clearInterval(session.timer);
+  dragSession = null;
+  const win = petWin;
+  if (!win || win.isDestroyed() || !runtime) {
+    dragCompletion = { moved: session.moved };
+    return dragCompletion;
+  }
+  const cursor = screen.getCursorScreenPoint();
+  const next = positionForCursor(
+    { x: session.originX, y: session.originY },
+    { x: session.grabX, y: session.grabY },
+    cursor,
+  );
+  // The button can come up before the next poll. Judge the gesture from the
+  // cursor, not from whether a tick has landed yet.
+  if (!session.moved && passedDragSlop(next.x - session.originX, next.y - session.originY)) {
+    session.moved = true;
+  }
+  if (session.moved) {
+    const size = petWindowSize(runtime.settings.window.scale);
+    // Keep the menu's expanded shell. Otherwise adopt the current scale so a
+    // Ctrl+wheel during the gesture is not lost, then snap once.
+    const width = menuChrome ? session.width : size.width;
+    const height = menuChrome ? session.height : size.height;
+    placeAt(win, next.x, next.y, width, height);
+    snapReleasedWindow(win, { x: session.originX, y: session.originY }, true);
+  }
+  dragCompletion = { moved: session.moved };
+  if (notify && !win.isDestroyed()) win.webContents.send("sakura:drag-finished", dragCompletion);
+  return dragCompletion;
+}
+
+function beginDrag(win: BrowserWindow): boolean {
+  if (win !== petWin || win.isDestroyed()) return false;
+  if (dragSession) finishDrag(false);
+  const cursor = screen.getCursorScreenPoint();
+  const bounds = win.getBounds();
+  // Own the pointer for the whole gesture. Hit-testing must not flip
+  // WS_EX_TRANSPARENT while the button is down — that drops capture exactly
+  // when the cursor reaches transparent chrome or a display edge.
+  win.setIgnoreMouseEvents(false);
+  const timer = setInterval(() => applyDragFrame(), 8);
+  dragSession = {
+    originX: bounds.x,
+    originY: bounds.y,
+    grabX: cursor.x,
+    grabY: cursor.y,
+    width: bounds.width,
+    height: bounds.height,
+    moved: false,
+    timer,
+  };
+  dragCompletion = null;
+  return true;
+}
+
 function wireDisplaySync(): void {
   const resync = () => {
     if (!petWin || petWin.isDestroyed() || !runtime) return;
-    if (menuChrome) return;
-    const b = petWin.getBounds();
-    const clamped = clampPetOrigin(b);
-    if (clamped.x !== b.x || clamped.y !== b.y) {
-      petWin.setPosition(clamped.x, clamped.y);
-      runtime.setWindowPosition(clamped.x, clamped.y);
+    if (dragSession) {
+      applyDragFrame();
+      return;
     }
+    if (menuChrome) return;
+    const size = petWindowSize(runtime.settings.window.scale);
+    const bounds = petWin.getBounds();
+    if (bounds.width !== size.width || bounds.height !== size.height) {
+      petWin.setBounds({ x: bounds.x, y: bounds.y, width: size.width, height: size.height });
+    }
+    snapReleasedWindow(petWin, undefined, false);
   };
   let t: NodeJS.Timeout | null = null;
   const schedule = () => {
@@ -335,26 +430,28 @@ function wireDisplaySync(): void {
   screen.on("display-removed", schedule);
 }
 
-function wireIpc(): void {
-  ipcMain.on("sakura:move-by", (event, payload: { dx?: number; dy?: number }) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win !== petWin) return;
-    if (typeof payload?.dx !== "number" || typeof payload?.dy !== "number") return;
-    if (!Number.isFinite(payload.dx) || !Number.isFinite(payload.dy)) return;
-    // Free move across monitors — never clamp to the current display mid-drag.
-    const [x, y] = win.getPosition();
-    win.setPosition(Math.round(x + payload.dx), Math.round(y + payload.dy));
+function installDragEndHook(win: BrowserWindow): void {
+  if (process.platform !== "win32") return;
+  // WM_LBUTTONUP. Backup for when the renderer loses pointerup at a monitor
+  // boundary. Do not call into Electron from the hook itself (it re-enters).
+  win.hookWindowMessage(0x0202, () => {
+    if (!dragSession) return;
+    setImmediate(() => {
+      if (dragSession) finishDrag();
+    });
   });
-  ipcMain.on("sakura:move-end", (event) => {
+}
+
+function wireIpc(): void {
+  ipcMain.handle("sakura:drag-start", (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win !== petWin || !runtime) return;
-    const b = win.getBounds();
-    const clamped = clampPetOrigin(b);
-    if (clamped.x !== b.x || clamped.y !== b.y) {
-      win.setPosition(clamped.x, clamped.y);
-    }
-    const [x, y] = win.getPosition();
-    runtime.setWindowPosition(x, y);
+    if (!win) return false;
+    return beginDrag(win);
+  });
+  ipcMain.handle("sakura:drag-end", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== petWin) return { moved: false };
+    return finishDrag();
   });
   ipcMain.on("sakura:open-settings", () => openSettings());
   ipcMain.on("sakura:quit", () => app.quit());
@@ -537,7 +634,7 @@ function wireIpc(): void {
     }
     const size = petWindowSize(runtime.settings.window.scale);
     win.setBounds({ x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height });
-    win.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
+    win.setMinimumSize(1, 1);
     menuChrome = null;
     return true;
   });
@@ -545,6 +642,9 @@ function wireIpc(): void {
   ipcMain.on("sakura:set-mouse-ignore", (event, ignore: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== petWin) return;
+    // Click-through uses WS_EX_TRANSPARENT, which drops pointer capture.
+    // Never turn it on while a drag is in progress.
+    if (dragSession && ignore) return;
     win.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
   });
 
@@ -561,6 +661,10 @@ function appRoot(): string {
 }
 
 app.on("before-quit", () => {
+  if (dragSession) {
+    clearInterval(dragSession.timer);
+    dragSession = null;
+  }
   server?.close();
   runtime?.dispose();
 });
