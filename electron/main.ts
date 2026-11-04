@@ -4,28 +4,15 @@ import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } f
 import { dataDir } from "../src/main/paths";
 import { PetRuntime, type ChangeReason } from "../src/main/runtime";
 import { startServer } from "../src/main/server";
+import {
+  clampOriginKeepingCenter,
+  cursorFollowOrigin,
+  displayUnderPoint,
+  layoutContextMenu,
+  petWindowSize,
+  type Rect,
+} from "../src/shared/screenLayout";
 import type http from "node:http";
-
-const BASE_W = 360;
-const BASE_H = 520;
-/** Match dsh-pet: window keeps side chrome so menus/bubbles fit without covering the figure. */
-const WINDOW_MARGIN_RATIO = 0.5;
-function petWindowSize(scale: number): { width: number; height: number; contentW: number; contentH: number; side: number; top: number; bottom: number } {
-  const contentW = Math.round(BASE_W * scale);
-  const contentH = Math.round(BASE_H * scale);
-  const side = Math.max(200, Math.round(contentW * WINDOW_MARGIN_RATIO));
-  const top = Math.max(56, Math.round(side * 0.28));
-  const bottom = Math.max(40, Math.round(side * 0.22));
-  return {
-    contentW,
-    contentH,
-    side,
-    top,
-    bottom,
-    width: contentW + side * 2,
-    height: contentH + top + bottom,
-  };
-}
 
 app.setName("sakura-pet");
 app.setPath("userData", dataDir());
@@ -75,6 +62,7 @@ async function boot(): Promise<void> {
   console.log(`[sakura-pet] pack ${config.paths.packPath}`);
   console.log(`[sakura-pet] form ${runtime.settings.activeForm}`);
 
+  logDisplays();
   createPetWindow();
   runtime.on("change", (reason: ChangeReason) => {
     if (reason === "settings" || reason === "reload") applyChrome(reason === "reload");
@@ -134,6 +122,7 @@ function createPetWindow(): void {
   petWin.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
   petWin.once("ready-to-show", () => petWin?.show());
   petWin.on("closed", () => {
+    clearDrag();
     petWin = null;
     app.quit();
   });
@@ -191,64 +180,23 @@ function openSettings(): void {
   });
 }
 
-type Rect = { x: number; y: number; width: number; height: number };
-
 function workAreas(): Rect[] {
   return screen.getAllDisplays().map((d) => ({ ...d.workArea }));
 }
 
-function pointInRect(r: Rect, x: number, y: number): boolean {
-  return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
-}
-
-function rectAtPoint(rects: Rect[], x: number, y: number): Rect | null {
-  for (const r of rects) if (pointInRect(r, x, y)) return r;
-  return null;
-}
-
-function distToRectSq(r: Rect, x: number, y: number): number {
-  const dx = Math.max(r.x - x, 0, x - (r.x + r.width));
-  const dy = Math.max(r.y - y, 0, y - (r.y + r.height));
-  return dx * dx + dy * dy;
-}
-
-function nearestRect(rects: Rect[], x: number, y: number): Rect | null {
-  let best: Rect | null = null;
-  let bestD = Infinity;
-  for (const r of rects) {
-    const d = distToRectSq(r, x, y);
-    if (d < bestD) {
-      bestD = d;
-      best = r;
-    }
+function logDisplays(): void {
+  for (const display of screen.getAllDisplays()) {
+    const b = display.bounds;
+    const w = display.workArea;
+    console.log(
+      `[sakura-pet] display id=${display.id} scaleFactor=${display.scaleFactor} bounds=${b.x},${b.y} ${b.width}x${b.height} work=${w.x},${w.y} ${w.width}x${w.height}`,
+    );
   }
-  return best;
 }
 
-/** Keep a point inside the union of work areas (snap to nearest screen if in a gap). */
-function clampPointToDisplays(x: number, y: number): { x: number; y: number } {
-  const areas = workAreas();
-  if (areas.length === 0) return { x, y };
-  if (rectAtPoint(areas, x, y)) return { x, y };
-  const r = nearestRect(areas, x, y);
-  if (!r) return { x, y };
-  return {
-    x: Math.min(Math.max(x, r.x), r.x + r.width - 1),
-    y: Math.min(Math.max(y, r.y), r.y + r.height - 1),
-  };
-}
-
-/** Keep pet window center on some display; margins may overhang into bezels. */
-function clampPetOrigin(origin: Rect): Rect {
-  const cx = origin.x + origin.width / 2;
-  const cy = origin.y + origin.height / 2;
-  const c = clampPointToDisplays(cx, cy);
-  return {
-    x: Math.round(c.x - origin.width / 2),
-    y: Math.round(c.y - origin.height / 2),
-    width: origin.width,
-    height: origin.height,
-  };
+function applyMinSize(win: BrowserWindow): void {
+  const min = petWindowSize(0.4);
+  win.setMinimumSize(min.width, min.height);
 }
 
 function placePet(force: boolean): void {
@@ -271,7 +219,7 @@ function placePet(force: boolean): void {
 }
 
 function applyChrome(place: boolean): void {
-  if (!runtime || !petWin) return;
+  if (!runtime || !petWin || dragSession) return;
   const size = petWindowSize(runtime.settings.window.scale);
   if (menuChrome) {
     // keep expanded shell; refresh content origin size bookkeeping
@@ -314,9 +262,9 @@ function ensureTray(): void {
 function wireDisplaySync(): void {
   const resync = () => {
     if (!petWin || petWin.isDestroyed() || !runtime) return;
-    if (menuChrome) return;
+    if (menuChrome || dragSession) return;
     const b = petWin.getBounds();
-    const clamped = clampPetOrigin(b);
+    const clamped = clampOriginKeepingCenter(b, workAreas());
     if (clamped.x !== b.x || clamped.y !== b.y) {
       petWin.setPosition(clamped.x, clamped.y);
       runtime.setWindowPosition(clamped.x, clamped.y);
@@ -335,26 +283,107 @@ function wireDisplaySync(): void {
   screen.on("display-removed", schedule);
 }
 
+type DragSession = {
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+  startX: number;
+  startY: number;
+  lastX: number;
+  lastY: number;
+  timer: ReturnType<typeof setInterval>;
+};
+
+/** Active only between drag-start and drag-end. Position is never read back mid-drag. */
+let dragSession: DragSession | null = null;
+
+function clearDrag(): void {
+  if (!dragSession) return;
+  clearInterval(dragSession.timer);
+  dragSession = null;
+}
+
+function applyDragPosition(): void {
+  const session = dragSession;
+  const win = petWin;
+  if (!session || !win || win.isDestroyed()) {
+    clearDrag();
+    return;
+  }
+  try {
+    const cursor = screen.getCursorScreenPoint();
+    const next = cursorFollowOrigin(cursor, { x: session.offsetX, y: session.offsetY });
+    if (next.x === session.lastX && next.y === session.lastY) return;
+    session.lastX = next.x;
+    session.lastY = next.y;
+    // Frozen DIP size: a scaleFactor change must not resize the pet while it crosses.
+    win.setBounds({ x: next.x, y: next.y, width: session.width, height: session.height });
+  } catch {
+    finishDrag();
+  }
+}
+
+function finishDrag(): void {
+  const session = dragSession;
+  const win = petWin;
+  if (!session) return;
+  clearDrag();
+  if (!win || win.isDestroyed()) return;
+  const origin = { x: session.lastX, y: session.lastY, width: session.width, height: session.height };
+  const clamped = clampOriginKeepingCenter(origin, workAreas());
+  try {
+    if (clamped.x !== origin.x || clamped.y !== origin.y) {
+      win.setBounds({ x: clamped.x, y: clamped.y, width: session.width, height: session.height });
+    }
+    win.setResizable(false);
+    applyMinSize(win);
+  } catch {
+    /* window is closing */
+  }
+  if (runtime && (clamped.x !== session.startX || clamped.y !== session.startY)) {
+    runtime.setWindowPosition(clamped.x, clamped.y);
+  }
+}
+
 function wireIpc(): void {
-  ipcMain.on("sakura:move-by", (event, payload: { dx?: number; dy?: number }) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win !== petWin) return;
-    if (typeof payload?.dx !== "number" || typeof payload?.dy !== "number") return;
-    if (!Number.isFinite(payload.dx) || !Number.isFinite(payload.dy)) return;
-    // Free move across monitors — never clamp to the current display mid-drag.
-    const [x, y] = win.getPosition();
-    win.setPosition(Math.round(x + payload.dx), Math.round(y + payload.dy));
-  });
-  ipcMain.on("sakura:move-end", (event) => {
+  // DOM screenX is not DIP on mixed-DPI Windows. Follow screen.getCursorScreenPoint
+  // (DIP, same space as setBounds) and do not clamp to one display until release.
+  ipcMain.on("sakura:drag-start", (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== petWin || !runtime) return;
-    const b = win.getBounds();
-    const clamped = clampPetOrigin(b);
-    if (clamped.x !== b.x || clamped.y !== b.y) {
-      win.setPosition(clamped.x, clamped.y);
+    if (dragSession) {
+      const prev = dragSession;
+      clearDrag();
+      applyMinSize(win);
+      runtime.setWindowPosition(prev.lastX, prev.lastY);
     }
-    const [x, y] = win.getPosition();
-    runtime.setWindowPosition(x, y);
+    const cursor = screen.getCursorScreenPoint();
+    const bounds = win.getBounds();
+    const size = petWindowSize(runtime.settings.window.scale);
+    win.setIgnoreMouseEvents(false);
+    // resizable:false windows on Windows can ignore setBounds onto a monitor in
+    // negative coordinates. A min size wider than the destination panel can too.
+    win.setResizable(true);
+    win.setMinimumSize(1, 1);
+    const session: DragSession = {
+      offsetX: cursor.x - bounds.x,
+      offsetY: cursor.y - bounds.y,
+      width: size.width,
+      height: size.height,
+      startX: bounds.x,
+      startY: bounds.y,
+      lastX: bounds.x,
+      lastY: bounds.y,
+      timer: setInterval(applyDragPosition, 16),
+    };
+    dragSession = session;
+    applyDragPosition();
+  });
+  ipcMain.on("sakura:drag-end", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== petWin) return;
+    finishDrag();
   });
   ipcMain.on("sakura:open-settings", () => openSettings());
   ipcMain.on("sakura:quit", () => app.quit());
@@ -369,182 +398,62 @@ function wireIpc(): void {
 
   ipcMain.handle("sakura:prepare-menu", (event, payload?: { width?: number; height?: number; prefer?: string }) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win !== petWin || !runtime) return null;
-    const menuW = Math.max(168, Math.round(payload?.width ?? 188));
-    const menuH = Math.max(160, Math.round(payload?.height ?? 280));
-    const gap = 6; // tight to figure, almost no overlap
+    if (!win || win !== petWin || !runtime || dragSession) return null;
     const size = petWindowSize(runtime.settings.window.scale);
-    // Full chrome window (un-expanded)
     const winOrigin = menuChrome
       ? { x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height }
       : { x: win.getBounds().x, y: win.getBounds().y, width: size.width, height: size.height };
-
-    // Figure/content box inside chrome — menu docks to THIS, not the wide margin edge
     const figure = {
       x: winOrigin.x + size.side,
       y: winOrigin.y + size.top,
       width: size.contentW,
       height: size.contentH,
     };
-
-    // Prefer the display under the figure; fall back to matching window
-    const area =
-      rectAtPoint(workAreas(), figure.x + figure.width / 2, figure.y + figure.height / 2) ??
-      screen.getDisplayMatching(win.getBounds()).workArea;
-
-    // Restore to chrome box first for stable math
-    win.setMinimumSize(40, 40);
-    win.setBounds(winOrigin);
-
-    const room = {
-      right: area.x + area.width - (figure.x + figure.width),
-      left: figure.x - area.x,
-      bottom: area.y + area.height - (figure.y + figure.height),
-      top: figure.y - area.y,
-    };
-    const needX = menuW + gap;
-    const needY = menuH + gap;
-    type Side = "left" | "right" | "top" | "bottom";
-    // Prefer left/right beside the figure. Only use top/bottom when both sides lack room.
-    const horiz: Side[] = room.right <= room.left ? ["left", "right"] : ["right", "left"];
-    const vert: Side[] = room.bottom <= room.top ? ["top", "bottom"] : ["bottom", "top"];
-    const pick = (sides: Side[], need: number): Side | null => {
-      for (const side of sides) {
-        if (room[side] >= need) return side;
-      }
-      return null;
-    };
-    const side =
-      pick(horiz, needX) ??
-      pick(vert, needY) ??
-      (["left", "right", "top", "bottom"] as Side[])
-        .map((s) => ({ s, space: room[s] }))
-        .sort((a, b) => b.space - a.space)[0].s;
-
-    // Expanded window must cover: chrome window ∪ menu (tight to figure)
-    let bounds = { ...winOrigin };
-    const pad = { left: 0, right: 0, top: 0, bottom: 0 };
-    let menu = { x: 0, y: 0 };
-
-    // Menu screen rect relative to figure, then convert to client coords after expand
-    let menuScreen = { x: 0, y: 0 };
-
-    if (side === "right") {
-      menuScreen = {
-        x: figure.x + figure.width + gap,
-        y: figure.y + figure.height - menuH, // bottom-align to figure
-      };
-    } else if (side === "left") {
-      menuScreen = {
-        x: figure.x - menuW - gap,
-        y: figure.y + figure.height - menuH,
-      };
-    } else if (side === "top") {
-      menuScreen = {
-        x: figure.x + Math.round((figure.width - menuW) / 2),
-        y: figure.y - menuH - gap,
-      };
-    } else {
-      menuScreen = {
-        x: figure.x + Math.round((figure.width - menuW) / 2),
-        y: figure.y + figure.height + gap,
-      };
-    }
-
-    // Soft vertical nudge so menu stays within current work area when possible
-    if (menuScreen.y < area.y + 4) menuScreen.y = area.y + 4;
-    if (menuScreen.y + menuH > area.y + area.height - 4) {
-      menuScreen.y = Math.max(area.y + 4, area.y + area.height - menuH - 4);
-    }
-    if (menuScreen.x < area.x + 4) menuScreen.x = area.x + 4;
-    if (menuScreen.x + menuW > area.x + area.width - 4) {
-      menuScreen.x = Math.max(area.x + 4, area.x + area.width - menuW - 4);
-    }
-
-    // Expand chrome window to include menuScreen (union)
-    const unionL = Math.min(winOrigin.x, menuScreen.x - 4);
-    const unionT = Math.min(winOrigin.y, menuScreen.y - 4);
-    const unionR = Math.max(winOrigin.x + winOrigin.width, menuScreen.x + menuW + 4);
-    const unionB = Math.max(winOrigin.y + winOrigin.height, menuScreen.y + menuH + 4);
-    bounds = {
-      x: unionL,
-      y: unionT,
-      width: unionR - unionL,
-      height: unionB - unionT,
-    };
-
-    // Clamp expanded window into the display under the figure (allow slight overhang)
-    if (bounds.x < area.x - 8) {
-      const shift = area.x - 8 - bounds.x;
-      bounds.x += shift;
-      menuScreen.x += shift;
-    }
-    if (bounds.y < area.y - 8) {
-      const shift = area.y - 8 - bounds.y;
-      bounds.y += shift;
-      menuScreen.y += shift;
-    }
-    if (bounds.x + bounds.width > area.x + area.width + 8) {
-      const shift = bounds.x + bounds.width - (area.x + area.width + 8);
-      bounds.x -= shift;
-      menuScreen.x -= shift;
-    }
-    if (bounds.y + bounds.height > area.y + area.height + 8) {
-      const shift = bounds.y + bounds.height - (area.y + area.height + 8);
-      bounds.y -= shift;
-      menuScreen.y -= shift;
-    }
-
-    const fitH = Math.min(menuH, Math.max(120, bounds.height - 8));
-    const fitW = Math.min(menuW, Math.max(120, bounds.width - 8));
-    menu = {
-      x: Math.round(menuScreen.x - bounds.x),
-      y: Math.round(menuScreen.y - bounds.y),
-    };
-    menu.x = Math.max(4, Math.min(menu.x, bounds.width - fitW - 4));
-    menu.y = Math.max(4, Math.min(menu.y, bounds.height - fitH - 4));
-
-    const contentX = winOrigin.x - bounds.x;
-    const contentY = winOrigin.y - bounds.y;
-    pad.left = Math.max(0, contentX);
-    pad.top = Math.max(0, contentY);
-    pad.right = Math.max(0, bounds.width - contentX - winOrigin.width);
-    pad.bottom = Math.max(0, bounds.height - contentY - winOrigin.height);
-
+    const cx = figure.x + figure.width / 2;
+    const cy = figure.y + figure.height / 2;
+    const area = displayUnderPoint(workAreas(), cx, cy) ?? screen.getPrimaryDisplay().workArea;
+    // Shrink onto the work area. Do not slide the pet to make a wide menu fit.
+    const layout = layoutContextMenu({
+      winOrigin,
+      figure,
+      workArea: area,
+      menuW: Math.round(payload?.width ?? 188),
+      menuH: Math.round(payload?.height ?? 300),
+    });
     menuChrome = { x: winOrigin.x, y: winOrigin.y, width: size.width, height: size.height };
-    win.setBounds(bounds);
+    win.setMinimumSize(1, 1);
+    win.setBounds(layout.bounds);
     return {
-      side,
-      menu,
-      pad: {
-        left: pad.left,
-        top: pad.top,
-        right: pad.right,
-        bottom: pad.bottom,
-      },
-      menuW: fitW,
-      menuH: fitH,
-      clampH: bounds.height - 8,
+      side: layout.side,
+      menu: layout.menu,
+      pad: layout.pad,
+      menuW: layout.menuW,
+      menuH: layout.menuH,
+      clampH: layout.clampH,
     };
   });
 
   ipcMain.handle("sakura:restore-menu", (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== petWin || !runtime) return false;
+    if (dragSession) {
+      menuChrome = null;
+      return true;
+    }
     if (!menuChrome) {
       applyChrome(false);
       return true;
     }
     const size = petWindowSize(runtime.settings.window.scale);
     win.setBounds({ x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height });
-    win.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
+    applyMinSize(win);
     menuChrome = null;
     return true;
   });
 
   ipcMain.on("sakura:set-mouse-ignore", (event, ignore: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win !== petWin) return;
+    if (!win || win !== petWin || dragSession) return;
     win.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
   });
 
@@ -561,6 +470,7 @@ function appRoot(): string {
 }
 
 app.on("before-quit", () => {
+  clearDrag();
   server?.close();
   runtime?.dispose();
 });

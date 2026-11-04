@@ -6,11 +6,12 @@ import { PetFigure } from "./figures";
 
 export function PetApp() {
   const backend = useBackend();
-  const [menu, setMenu] = useState<{ x: number; y: number; side: string; clampH: number; menuH?: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; side: string; clampH: number; menuH?: number; menuW?: number } | null>(null);
   const [menuPad, setMenuPad] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [pressed, setPressed] = useState(false);
+  const draggingRef = useRef(false);
   const [reaction, setReaction] = useState(false);
   const [zoomHint, setZoomHint] = useState<number | null>(null);
   const scaleRef = useRef(1);
@@ -107,11 +108,15 @@ export function PetApp() {
       window.sakuraPet?.setMouseIgnore(ignore);
     };
     const onMove = (event: MouseEvent) => {
+      if (draggingRef.current) return;
       const el = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
       const hit = !!(el && el.closest("[data-hit]"));
       apply(!hit);
     };
-    const onLeave = () => apply(true);
+    const onLeave = () => {
+      if (draggingRef.current) return;
+      apply(true);
+    };
     window.addEventListener("mousemove", onMove);
     document.documentElement.addEventListener("mouseleave", onLeave);
     apply(true);
@@ -140,27 +145,39 @@ export function PetApp() {
   const onPointerDown = (event: ReactPointerEvent) => {
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest("[data-no-drag]")) return;
-    let lastX = event.screenX;
-    let lastY = event.screenY;
+    // This click dismisses the menu. Starting a drag here races restoreMenu's setBounds.
+    if (menu) return;
+    const cap = (event.target as HTMLElement).closest("[data-hit]") as HTMLElement | null;
     let moved = false;
-    const move = (ev: PointerEvent) => {
-      const dx = ev.screenX - lastX;
-      const dy = ev.screenY - lastY;
-      lastX = ev.screenX;
-      lastY = ev.screenY;
-      if (dx || dy) moved = true;
-      window.sakuraPet?.moveBy(dx, dy);
+    const move = () => {
+      moved = true;
     };
-    const up = () => {
+    const end = (ev: PointerEvent) => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
       setPressed(false);
-      if (moved) window.sakuraPet?.moveEnd();
-      else setReaction(true);
+      window.sakuraPet?.endDrag();
+      const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+      window.sakuraPet?.setMouseIgnore(!(under && under.closest("[data-hit]")));
+      if (!moved) setReaction(true);
     };
+    draggingRef.current = true;
     setPressed(true);
+    // Capture stays on for the gesture. The main process places the window from
+    // the DIP cursor, so screenX deltas never cross a scaleFactor boundary.
+    window.sakuraPet?.setMouseIgnore(false);
+    window.sakuraPet?.beginDrag();
+    try {
+      cap?.setPointerCapture(event.pointerId);
+    } catch {
+      /* pointer already released */
+    }
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   };
 
   return (
@@ -185,7 +202,14 @@ export function PetApp() {
           const prepared = await window.sakuraPet?.prepareMenu?.({ width: 188, height: 300 });
           if (prepared) {
             setMenuPad(prepared.pad);
-            setMenu({ x: prepared.menu.x, y: prepared.menu.y, side: prepared.side, clampH: prepared.clampH, menuH: prepared.menuH });
+            setMenu({
+              x: prepared.menu.x,
+              y: prepared.menu.y,
+              side: prepared.side,
+              clampH: prepared.clampH,
+              menuH: prepared.menuH,
+              menuW: prepared.menuW,
+            });
             return;
           }
           // fallback: local clamp
@@ -195,6 +219,8 @@ export function PetApp() {
             y: Math.max(8, Math.min(event.clientY, window.innerHeight - 260)),
             side: "right",
             clampH: window.innerHeight - 8,
+            menuW: Math.min(188, Math.max(96, window.innerWidth - 16)),
+            menuH: Math.min(300, Math.max(120, window.innerHeight - 16)),
           });
           void stage;
         })();
@@ -230,7 +256,12 @@ export function PetApp() {
           ref={menuRef}
           data-no-drag
           data-hit
-          style={{ left: menu.x, top: menu.y, maxHeight: Math.max(140, Math.min(menu.menuH ?? 300, menu.clampH - 8)) }}
+          style={{
+            left: menu.x,
+            top: menu.y,
+            width: menu.menuW,
+            maxHeight: menu.menuH ?? menu.clampH,
+          }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div className="menu-status" aria-live="polite">

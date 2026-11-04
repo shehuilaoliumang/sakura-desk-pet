@@ -44,6 +44,7 @@ body[data-window="settings"] { background: var(--paper); }
   position: relative;
   pointer-events: none;
   box-sizing: border-box;
+  touch-action: none;
 }
 .pet-root [data-hit] { pointer-events: auto; }
 .pet-root.pressed { cursor: grabbing; }
@@ -239,8 +240,9 @@ body[data-window="settings"] { background: var(--paper); }
 .menu {
   position: fixed;
   z-index: 20;
-  min-width: 168px;
-  max-width: 220px;
+  min-width: 0;
+  max-width: none;
+  width: 188px;
   padding: 8px;
   border-radius: 14px;
   background: rgba(22, 14, 16, 0.94);
@@ -253,7 +255,14 @@ body[data-window="settings"] { background: var(--paper); }
   overscroll-behavior: contain;
 }
 .menu hr { width: 100%; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.12); margin: 4px 0; }
-.menu button { text-align: left; background: transparent; }
+.menu button {
+  text-align: left;
+  background: transparent;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .menu button[aria-pressed="true"] {
   background: var(--cinnabar);
   border-color: transparent;

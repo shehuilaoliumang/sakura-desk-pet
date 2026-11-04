@@ -13,7 +13,8 @@
     "start": "node scripts/start.mjs",
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
-    "check": "tsx src/main/selfcheck.ts"
+    "check": "tsx src/main/selfcheck.ts && tsx scripts/screenLayout.check.ts",
+    "check:layout": "tsx scripts/screenLayout.check.ts"
   },
   "dependencies": {
     "electron": "^33.4.11",

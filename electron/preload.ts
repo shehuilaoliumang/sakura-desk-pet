@@ -10,12 +10,11 @@ export type PreparedMenu = {
 };
 
 contextBridge.exposeInMainWorld("sakuraPet", {
-  moveBy(dx: number, dy: number) {
-    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    ipcRenderer.send("sakura:move-by", { dx, dy });
+  beginDrag() {
+    ipcRenderer.send("sakura:drag-start");
   },
-  moveEnd() {
-    ipcRenderer.send("sakura:move-end");
+  endDrag() {
+    ipcRenderer.send("sakura:drag-end");
   },
   openSettings() {
     ipcRenderer.send("sakura:open-settings");

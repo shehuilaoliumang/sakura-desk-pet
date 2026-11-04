@@ -10,8 +10,8 @@ export type PreparedMenu = {
 };
 
 export interface SakuraPetBridge {
-  moveBy(dx: number, dy: number): void;
-  moveEnd(): void;
+  beginDrag(): void;
+  endDrag(): void;
   openSettings(): void;
   quit(): void;
   reveal(target: "settings" | "pack"): void;
