@@ -158,7 +158,7 @@ function openSettings(): void {
     minHeight: 560,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: "#f3eee6",
+    backgroundColor: "#e8eef5",
     title: "樱 · 设置",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),

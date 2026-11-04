@@ -17,6 +17,8 @@ export function PetApp() {
   const [zoomHint, setZoomHint] = useState<number | null>(null);
   const [ask, setAsk] = useState("");
   const [asking, setAsking] = useState(false);
+  const [chatNote, setChatNote] = useState("");
+  const chatRef = useRef<HTMLInputElement | null>(null);
   const [layout, setLayout] = useState<PetLayoutEvent | null>(null);
   const scaleRef = useRef(1);
   const zoomTimer = useRef<number | null>(null);
@@ -223,7 +225,7 @@ export function PetApp() {
       onContextMenu={(event) => {
         event.preventDefault();
         void (async () => {
-          const prepared = await window.sakuraPet?.prepareMenu?.({ width: 200, height: 380 });
+          const prepared = await window.sakuraPet?.prepareMenu?.({ width: 188, height: 280 });
           if (prepared) {
             setMenuPad(prepared.pad);
             setMenu({
@@ -239,12 +241,12 @@ export function PetApp() {
           // fallback: local clamp
           const stage = stageRef.current?.getBoundingClientRect();
           setMenu({
-            x: Math.max(8, Math.min(event.clientX, window.innerWidth - 208)),
-            y: Math.max(8, Math.min(event.clientY, window.innerHeight - 300)),
+            x: Math.max(8, Math.min(event.clientX, window.innerWidth - 196)),
+            y: Math.max(8, Math.min(event.clientY, window.innerHeight - 240)),
             side: "right",
             clampH: window.innerHeight - 8,
-            menuW: Math.min(200, Math.max(96, window.innerWidth - 16)),
-            menuH: Math.min(380, Math.max(160, window.innerHeight - 16)),
+            menuW: Math.min(188, Math.max(96, window.innerWidth - 16)),
+            menuH: Math.min(280, Math.max(140, window.innerHeight - 16)),
           });
           void stage;
         })();
@@ -262,6 +264,53 @@ export function PetApp() {
       </div>
 
       <div className="stage" data-hit ref={stageRef}>
+        <form
+          className="chat-pill"
+          data-no-drag
+          data-hit
+          onSubmit={(event) => {
+            event.preventDefault();
+            const message = ask.trim();
+            if (!message || asking) return;
+            setAsking(true);
+            setChatNote("");
+            void postLlmChat(message).then((result) => {
+              if (result.source === "fallback") setChatNote(result.detail || "……这会儿说不了。");
+              else setChatNote("");
+            }).catch(() => {
+              setChatNote("接口没有应答");
+            }).finally(() => {
+              setAsking(false);
+              setAsk("");
+            });
+          }}
+          onContextMenu={(event) => event.stopPropagation()}
+        >
+          <input
+            ref={chatRef}
+            type="text"
+            value={ask}
+            maxLength={400}
+            placeholder="说点什么..."
+            aria-label="说点什么"
+            data-no-drag
+            onPointerDown={(event) => event.stopPropagation()}
+            onChange={(event) => setAsk(event.target.value)}
+          />
+          <div className="chat-tools">
+            <button type="button" className="chat-tool" disabled title="图片还没接上" aria-label="图片">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="4" y="5" width="16" height="14" rx="2" /><circle cx="9" cy="10" r="1.4" /><path d="M7 16l3.2-3.2 2.2 2.2L16 11l3 4" /></svg>
+            </button>
+            <button type="button" className="chat-tool" disabled title="拍照还没接上" aria-label="拍照">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M8 7l1.2-2h5.6L16 7h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h3z" /><circle cx="12" cy="13" r="3" /></svg>
+            </button>
+            <button type="button" className="chat-tool" disabled title="语音还没接上" aria-label="语音">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M6 11a6 6 0 0 0 12 0M12 17v4" /></svg>
+            </button>
+            <button type="submit" className="chat-send" disabled={asking || !ask.trim()}>{asking ? "…" : "发送"}</button>
+          </div>
+          {chatNote ? <p className="chat-note">{chatNote}</p> : null}
+        </form>
         <Figure
           form={activeForm}
           mood={mood}
@@ -303,48 +352,33 @@ export function PetApp() {
               aria-pressed={id === activeForm}
               onClick={() => { void postForm(id); setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.(); }}
             >
-              {settings.forms[id].displayName}
+              <span>{settings.forms[id].displayName}</span>
+              <span className="hint-key">{formShortcut(id)}</span>
             </button>
           ))}
           <hr />
-          <form
-            className="menu-ask"
-            data-no-drag
-            onSubmit={(event) => {
-              event.preventDefault();
-              const message = ask.trim();
-              if (!message || asking) return;
-              setAsking(true);
-              void postLlmChat(message).finally(() => {
-                setAsking(false);
-                setAsk("");
-                setMenu(null);
-                setMenuPad(null);
-                void window.sakuraPet?.restoreMenu?.();
-              });
+          <button
+            type="button"
+            onClick={() => {
+              setMenu(null);
+              setMenuPad(null);
+              void window.sakuraPet?.restoreMenu?.();
+              window.setTimeout(() => chatRef.current?.focus(), 60);
             }}
           >
-            <input
-              value={ask}
-              maxLength={400}
-              placeholder="问一句"
-              aria-label="问一句"
-              data-no-drag
-              onPointerDown={(event) => event.stopPropagation()}
-              onChange={(event) => setAsk(event.target.value)}
-            />
-            <button type="submit" disabled={asking || !ask.trim()}>{asking ? "在问…" : "问一句"}</button>
-          </form>
+            <span>对话</span>
+          </button>
           <button type="button" onClick={() => { openSettings(); setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.(); }}>
-            设置
+            <span>设置</span>
+            <span className="hint-key">,</span>
           </button>
           {window.sakuraPet ? (
             <button type="button" onClick={() => quitApp()}>
-              退出
+              <span>退出</span>
             </button>
           ) : (
             <button type="button" onClick={() => { window.location.hash = "#/settings"; }}>
-              在这页打开设置
+              <span>在这页打开设置</span>
             </button>
           )}
         </div>
@@ -357,6 +391,14 @@ export function PetApp() {
 }
 
 
+
+function formShortcut(id: FormId): string {
+  if (id === "normal") return "1";
+  if (id === "dark") return "2";
+  if (id === "duo") return "3";
+  if (id === "form4") return "4";
+  return "5";
+}
 
 function bubbleCols(form: FormId, lineCount: number, scale: number): number {
   if (form === "duo") return scale >= 0.6 ? 2 : 1;

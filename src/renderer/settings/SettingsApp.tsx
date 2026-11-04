@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { DEFAULT_PERSONA } from "@shared/defaults";
 import { listLlmProviders } from "@shared/llm";
 import { speakFor } from "@shared/lines";
@@ -16,6 +16,13 @@ import { postForm, postLlmChat, postLlmTest, postReset, putSettings, quitApp, re
 import { useBackend } from "../useBackend";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
+type FoldId = "basic" | "chat" | "advanced";
+
+const FOLD_DEFAULT: Record<FoldId, boolean> = {
+  basic: true,
+  chat: true,
+  advanced: false,
+};
 
 export function SettingsApp() {
   const backend = useBackend();
@@ -30,6 +37,7 @@ export function SettingsApp() {
   const [llmNote, setLlmNote] = useState("");
   const [llmNoteOk, setLlmNoteOk] = useState(false);
   const [chatDraft, setChatDraft] = useState("在吗");
+  const [openSections, setOpenSections] = useState(FOLD_DEFAULT);
   const dirty = useRef(false);
   const seq = useRef(0);
   const timer = useRef<number | null>(null);
@@ -55,6 +63,10 @@ export function SettingsApp() {
   const serverForm = backend.state.sections.config.data.activeForm;
   const work = backend.state.sections.workStatus.data;
   const spoken = speakFor(draft, preview, draft.activeForm);
+  const personaNotes = (["normal", "dark", "duo", "form4", "form5"] as const).filter((id) => draft.forms[id].persona.trim()).length;
+  const toggleSection = (id: FoldId) => {
+    setOpenSections((current) => ({ ...current, [id]: !current[id] }));
+  };
 
   const finishSave = (id: number, result: Awaited<ReturnType<typeof putSettings>>): boolean => {
     if (id !== seq.current) return false;
@@ -176,9 +188,9 @@ export function SettingsApp() {
           {backend.pack?.warning ? <p className="banner">{backend.pack.warning}</p> : null}
         </header>
 
-        <div className="settings-grid">
-          <section className="panel">
-            <h2>称呼</h2>
+        <Section id="basic" title="基础设置" summary={draft.forms[draft.activeForm].displayName} open={openSections.basic} onToggle={toggleSection}>
+          <div className="subblock">
+            <h3>称呼</h3>
             <p className="hint">称谓是常态樱的叫法，黑樱在不允许直呼时也用它。昵称只在打开直呼之后交给黑樱。</p>
             <label className="field">
               <span>称谓</span>
@@ -193,10 +205,9 @@ export function SettingsApp() {
                 onChange={(event) => edit((current) => ({ ...current, nickname: event.target.value }))}
               />
             </label>
-          </section>
-
-          <section className="panel">
-            <h2>形态</h2>
+          </div>
+          <div className="subblock">
+            <h3>形态</h3>
             <p className="hint">当前形态马上生效。开机默认要到下次启动。第 4、第 5 槽启用后也只是占位，方便以后接动画包。</p>
             <p className="field-label">当前</p>
             <div className="segmented">
@@ -232,189 +243,13 @@ export function SettingsApp() {
                 </label>
               ))}
             </div>
-          </section>
-
-          <section className="panel">
-            <h2>语气</h2>
-            <p className="hint">这些旋钮决定现在这几句短台词。强度拉高会把句子说完整，敬语倾向压低时常态樱会收着敬语。毒舌上限是黑樱的天花板，强度不能把它顶破。</p>
-            <Slider label="语气强度" value={draft.tone.intensity} onChange={(value) => edit((current) => ({ ...current, tone: { ...current.tone, intensity: value } }))} />
-            <Slider label="敬语倾向" value={draft.tone.politeness} onChange={(value) => edit((current) => ({ ...current, tone: { ...current.tone, politeness: value } }))} />
-            <Slider label="黑樱毒舌上限" value={draft.snarkCap} onChange={(value) => edit((current) => ({ ...current, snarkCap: value }))} />
-            <Switch
-              on={draft.darkMayAddressDirectly}
-              label="允许黑樱直呼"
-              onChange={(value) => edit((current) => ({ ...current, darkMayAddressDirectly: value }))}
-            />
-          </section>
-
-          <section className="panel">
-            <h2>双人声部</h2>
-            <p className="hint">默认黑樱主说。关掉双气泡时，只留下占比不低于一半的那一方；正好一半时由黑樱说。两条句子用 || 分开时，广播会同时给两边。</p>
-            <div className="split-readout">
-              <span>常态樱 {100 - draft.duoVoice.darkShare}%</span>
-              <span>黑樱 {draft.duoVoice.darkShare}%</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={draft.duoVoice.darkShare}
-              aria-label="黑樱声部占比"
-              onChange={(event) => edit((current) => ({ ...current, duoVoice: { ...current.duoVoice, darkShare: Number(event.target.value) } }))}
-            />
-            <Switch
-              on={draft.duoVoice.dualBubble}
-              label="双气泡"
-              onChange={(value) => edit((current) => ({ ...current, duoVoice: { ...current.duoVoice, dualBubble: value } }))}
-            />
-            <div className="preview">
-              <div className="segmented slim">
-                {PET_EVENTS.map((event) => (
-                  <button key={event} type="button" aria-pressed={preview === event} onClick={() => setPreview(event)}>
-                    {STATUS_LABEL[event]}
-                  </button>
-                ))}
-              </div>
-              <p className="preview-note">预听当前旋钮，不会改桌宠身上的状态。</p>
-              {spoken.lines.map((line) => (
-                <div key={`${line.speaker}-${line.text}`}>
-                  <span className="who">{line.speaker === "dark" ? draft.forms.dark.displayName : draft.forms.normal.displayName}</span>
-                  <p>{line.text}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        <section className="panel span">
-          <h2>人设补充</h2>
-          <p className="hint">
-            写在这里的文字会盖过内置默认，并出现在 <code>GET /pet/config</code> 的 effective 里，给以后的对话适配器读。
-            可以用 <code>{"{{honorific}}"}</code> 和 <code>{"{{nickname}}"}</code>。眼前的短台词仍由上面的旋钮决定。
-          </p>
-          <div className="persona-grid">
-            {(["normal", "dark", "duo"] as const).map((id) => (
-              <label key={id} className="field">
-                <span>{draft.forms[id].displayName}</span>
-                <textarea
-                  value={draft.forms[id].persona}
-                  maxLength={2000}
-                  placeholder="留空则使用内置默认"
-                  onChange={(event) => edit((current) => ({
-                    ...current,
-                    forms: { ...current.forms, [id]: { ...current.forms[id], persona: event.target.value } },
-                  }))}
-                />
-                <details>
-                  <summary>内置默认</summary>
-                  <pre>{materializePersona(DEFAULT_PERSONA[id], draft)}</pre>
-                </details>
-              </label>
-            ))}
           </div>
-          <div className="reserved-row">
-            {(["form4", "form5"] as const).map((id) => (
-              <div key={id} className="reserved">
-                <Switch
-                  on={draft.forms[id].enabled}
-                  label={`启用${draft.forms[id].displayName}`}
-                  onChange={(value) => edit((current) => ({
-                    ...current,
-                    forms: { ...current.forms, [id]: { ...current.forms[id], enabled: value } },
-                  }))}
-                />
-                <label className="field">
-                  <span>补充人设</span>
-                  <textarea
-                    value={draft.forms[id].persona}
-                    maxLength={2000}
-                    disabled={!draft.forms[id].enabled}
-                    placeholder="启用后可以先写人设，立绘以后再补"
-                    onChange={(event) => edit((current) => ({
-                      ...current,
-                      forms: { ...current.forms, [id]: { ...current.forms[id], persona: event.target.value } },
-                    }))}
-                  />
-                </label>
-              </div>
-            ))}
-          </div>
-        </section>
+        </Section>
 
-        <div className="settings-grid">
-          <section className="panel">
-            <h2>禁忌词</h2>
-            <p className="hint">短台词和外面投来的气泡都会把这些词换成 ※。回车添加。</p>
-            <div className="chips">
-              {draft.tabooWords.map((word) => (
-                <span key={word} className="chip">
-                  {word}
-                  <button
-                    type="button"
-                    aria-label={`去掉 ${word}`}
-                    onClick={() => edit((current) => ({ ...current, tabooWords: current.tabooWords.filter((item) => item !== word) }))}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-            <input
-              value={tabooDraft}
-              maxLength={32}
-              placeholder="不想听到的词"
-              onChange={(event) => setTabooDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === ",") {
-                  event.preventDefault();
-                  addTaboo();
-                }
-              }}
-            />
-          </section>
-
-          <section className="panel">
-            <h2>窗口与动画包</h2>
-            <Slider
-              label={`缩放 % · 约 ${Math.round(360 * draft.window.scale)}×${Math.round(480 * draft.window.scale)}`}
-              value={Math.round(draft.window.scale * 100)}
-              min={40}
-              max={200}
-              onChange={(value) => edit((current) => ({ ...current, window: { ...current.window, scale: value / 100 } }))}
-            />
-            <div className="row-actions">
-              <button type="button" onClick={() => edit((current) => ({ ...current, window: { ...current.window, scale: 0.5 } }))}>小</button>
-              <button type="button" onClick={() => edit((current) => ({ ...current, window: { ...current.window, scale: 0.65 } }))}>中</button>
-              <button type="button" onClick={() => edit((current) => ({ ...current, window: { ...current.window, scale: 1 } }))}>大</button>
-            </div>
-            <Switch
-              on={draft.window.alwaysOnTop}
-              label="置顶"
-              onChange={(value) => edit((current) => ({ ...current, window: { ...current.window, alwaysOnTop: value } }))}
-            />
-            <label className="field">
-              <span>动画包路径</span>
-              <input
-                value={draft.pack.root}
-                onChange={(event) => edit((current) => ({ ...current, pack: { root: event.target.value } }))}
-              />
-            </label>
-            <p className="hint">
-              把 <code>idle.webm</code>、<code>thinking.gif</code> 这类文件放进 <code>animations/&lt;形态&gt;/</code>，文件名用六个状态名。没有文件时用内置矢量。
-            </p>
-            <div className="row-actions">
-              <button type="button" onClick={() => void reloadPack()}>重新扫描</button>
-              <button type="button" onClick={() => reveal("pack")}>打开动画包</button>
-            </div>
-            {backend.pack ? <p className="hint">{backend.pack.name} · {backend.pack.credit}</p> : null}
-          </section>
-        </div>
-
-        <section className="panel span">
-          <h2>智能对话</h2>
+        <Section id="chat" title="对话设置" summary={draft.llm.enabled ? "已打开" : "未打开"} open={openSections.chat} onToggle={toggleSection}>
           <p className="hint">
             空闲、工作、等待这些状态气泡仍用内置短句，不会在每次状态变化时去问模型。
-            模型只在你主动开口时用：这里的「试对话」、桌宠右键「问一句」，或托盘里的「试对话」（托盘发送「在吗」）。
+            要对她说话，用桌宠旁边的「说点什么...」。右键「对话」会把光标放进那一栏。托盘「试对话」发送「在吗」。
             没打开、没填密钥或接口地址、或请求失败时，气泡改说「……这会儿说不了。」，工作状态不动。
             密钥只写在本机配置里。
           </p>
@@ -538,10 +373,181 @@ export function SettingsApp() {
             </button>
           </div>
           {llmNote ? <p className={llmNoteOk ? "llm-note ok" : "llm-note bad"}>{llmNote}</p> : null}
-        </section>
+        </Section>
 
-        <section className="panel span">
-          <h2>适配器</h2>
+
+        <Section id="advanced" title="进阶设置" summary={personaNotes ? `${personaNotes} 处人设补充` : "语气、窗口、适配器"} open={openSections.advanced} onToggle={toggleSection}>
+          <div className="settings-grid">
+          <div className="subblock">
+            <h3>语气</h3>
+            <p className="hint">这些旋钮决定现在这几句短台词。强度拉高会把句子说完整，敬语倾向压低时常态樱会收着敬语。毒舌上限是黑樱的天花板，强度不能把它顶破。</p>
+            <Slider label="语气强度" value={draft.tone.intensity} onChange={(value) => edit((current) => ({ ...current, tone: { ...current.tone, intensity: value } }))} />
+            <Slider label="敬语倾向" value={draft.tone.politeness} onChange={(value) => edit((current) => ({ ...current, tone: { ...current.tone, politeness: value } }))} />
+            <Slider label="黑樱毒舌上限" value={draft.snarkCap} onChange={(value) => edit((current) => ({ ...current, snarkCap: value }))} />
+            <Switch
+              on={draft.darkMayAddressDirectly}
+              label="允许黑樱直呼"
+              onChange={(value) => edit((current) => ({ ...current, darkMayAddressDirectly: value }))}
+            />
+          </div>
+          <div className="subblock">
+            <h3>双人声部</h3>
+            <p className="hint">默认黑樱主说。关掉双气泡时，只留下占比不低于一半的那一方；正好一半时由黑樱说。两条句子用 || 分开时，广播会同时给两边。</p>
+            <div className="split-readout">
+              <span>常态樱 {100 - draft.duoVoice.darkShare}%</span>
+              <span>黑樱 {draft.duoVoice.darkShare}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={draft.duoVoice.darkShare}
+              aria-label="黑樱声部占比"
+              onChange={(event) => edit((current) => ({ ...current, duoVoice: { ...current.duoVoice, darkShare: Number(event.target.value) } }))}
+            />
+            <Switch
+              on={draft.duoVoice.dualBubble}
+              label="双气泡"
+              onChange={(value) => edit((current) => ({ ...current, duoVoice: { ...current.duoVoice, dualBubble: value } }))}
+            />
+            <div className="preview">
+              <div className="segmented slim">
+                {PET_EVENTS.map((event) => (
+                  <button key={event} type="button" aria-pressed={preview === event} onClick={() => setPreview(event)}>
+                    {STATUS_LABEL[event]}
+                  </button>
+                ))}
+              </div>
+              <p className="preview-note">预听当前旋钮，不会改桌宠身上的状态。</p>
+              {spoken.lines.map((line) => (
+                <div key={`${line.speaker}-${line.text}`}>
+                  <span className="who">{line.speaker === "dark" ? draft.forms.dark.displayName : draft.forms.normal.displayName}</span>
+                  <p>{line.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="subblock span">
+            <h3>人设补充</h3>
+          <p className="hint">
+            写在这里的文字会盖过内置默认，并出现在 <code>GET /pet/config</code> 的 effective 里，给以后的对话适配器读。
+            可以用 <code>{"{{honorific}}"}</code> 和 <code>{"{{nickname}}"}</code>。眼前的短台词仍由上面的旋钮决定。
+          </p>
+          <div className="persona-grid">
+            {(["normal", "dark", "duo"] as const).map((id) => (
+              <label key={id} className="field">
+                <span>{draft.forms[id].displayName}</span>
+                <textarea
+                  value={draft.forms[id].persona}
+                  maxLength={2000}
+                  placeholder="留空则使用内置默认"
+                  onChange={(event) => edit((current) => ({
+                    ...current,
+                    forms: { ...current.forms, [id]: { ...current.forms[id], persona: event.target.value } },
+                  }))}
+                />
+                <details>
+                  <summary>内置默认</summary>
+                  <pre>{materializePersona(DEFAULT_PERSONA[id], draft)}</pre>
+                </details>
+              </label>
+            ))}
+          </div>
+          <div className="reserved-row">
+            {(["form4", "form5"] as const).map((id) => (
+              <div key={id} className="reserved">
+                <Switch
+                  on={draft.forms[id].enabled}
+                  label={`启用${draft.forms[id].displayName}`}
+                  onChange={(value) => edit((current) => ({
+                    ...current,
+                    forms: { ...current.forms, [id]: { ...current.forms[id], enabled: value } },
+                  }))}
+                />
+                <label className="field">
+                  <span>补充人设</span>
+                  <textarea
+                    value={draft.forms[id].persona}
+                    maxLength={2000}
+                    disabled={!draft.forms[id].enabled}
+                    placeholder="启用后可以先写人设，立绘以后再补"
+                    onChange={(event) => edit((current) => ({
+                      ...current,
+                      forms: { ...current.forms, [id]: { ...current.forms[id], persona: event.target.value } },
+                    }))}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+          </div>
+          <div className="subblock">
+            <h3>禁忌词</h3>
+            <p className="hint">短台词和外面投来的气泡都会把这些词换成 ※。回车添加。</p>
+            <div className="chips">
+              {draft.tabooWords.map((word) => (
+                <span key={word} className="chip">
+                  {word}
+                  <button
+                    type="button"
+                    aria-label={`去掉 ${word}`}
+                    onClick={() => edit((current) => ({ ...current, tabooWords: current.tabooWords.filter((item) => item !== word) }))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <input
+              value={tabooDraft}
+              maxLength={32}
+              placeholder="不想听到的词"
+              onChange={(event) => setTabooDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === ",") {
+                  event.preventDefault();
+                  addTaboo();
+                }
+              }}
+            />
+          </div>
+          <div className="subblock">
+            <h3>窗口与动画包</h3>
+            <Slider
+              label={`缩放 % · 约 ${Math.round(360 * draft.window.scale)}×${Math.round(480 * draft.window.scale)}`}
+              value={Math.round(draft.window.scale * 100)}
+              min={40}
+              max={200}
+              onChange={(value) => edit((current) => ({ ...current, window: { ...current.window, scale: value / 100 } }))}
+            />
+            <div className="row-actions">
+              <button type="button" onClick={() => edit((current) => ({ ...current, window: { ...current.window, scale: 0.5 } }))}>小</button>
+              <button type="button" onClick={() => edit((current) => ({ ...current, window: { ...current.window, scale: 0.65 } }))}>中</button>
+              <button type="button" onClick={() => edit((current) => ({ ...current, window: { ...current.window, scale: 1 } }))}>大</button>
+            </div>
+            <Switch
+              on={draft.window.alwaysOnTop}
+              label="置顶"
+              onChange={(value) => edit((current) => ({ ...current, window: { ...current.window, alwaysOnTop: value } }))}
+            />
+            <label className="field">
+              <span>动画包路径</span>
+              <input
+                value={draft.pack.root}
+                onChange={(event) => edit((current) => ({ ...current, pack: { root: event.target.value } }))}
+              />
+            </label>
+            <p className="hint">
+              把 <code>idle.webm</code>、<code>thinking.gif</code> 这类文件放进 <code>animations/&lt;形态&gt;/</code>，文件名用六个状态名。没有文件时用内置矢量。
+            </p>
+            <div className="row-actions">
+              <button type="button" onClick={() => void reloadPack()}>重新扫描</button>
+              <button type="button" onClick={() => reveal("pack")}>打开动画包</button>
+            </div>
+            {backend.pack ? <p className="hint">{backend.pack.name} · {backend.pack.credit}</p> : null}
+          </div>
+          <div className="subblock span">
+            <h3>适配器</h3>
           <p className="hint">
             <code>POST /pet/work-status</code> 是外部状态槽，最后写入者生效，不受下面的开关影响，也绝不会换形态。
             开关管的是 <code>POST /pet/events</code> 的 source。
@@ -585,8 +591,9 @@ export function SettingsApp() {
               </button>
             </p>
           ) : null}
-        </section>
-
+          </div>
+        </div>
+        </Section>
         <footer className="settings-footer">
           <div>
             <button
@@ -618,6 +625,44 @@ export function SettingsApp() {
         <p className="hint">双击桌宠、底栏或逗号键也能打开这份设置。数字键 1 到 3 换形态。</p>
       </div>
     </main>
+  );
+}
+
+function Section({
+  id,
+  title,
+  summary,
+  open,
+  onToggle,
+  children,
+}: {
+  id: FoldId;
+  title: string;
+  summary?: string;
+  open: boolean;
+  onToggle: (id: FoldId) => void;
+  children: ReactNode;
+}) {
+  const bodyId = `fold-${id}`;
+  return (
+    <section className={open ? "panel is-open" : "panel"}>
+      <h2>
+        <button
+          type="button"
+          className="fold-toggle"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={() => onToggle(id)}
+        >
+          <span className="fold-title">{title}</span>
+          <span className="fold-summary">{summary ?? ""}</span>
+          <span className={open ? "fold-chevron open" : "fold-chevron"} aria-hidden="true" />
+        </button>
+      </h2>
+      <div id={bodyId} className="fold-body" hidden={!open}>
+        {children}
+      </div>
+    </section>
   );
 }
 
