@@ -190,7 +190,8 @@ function placePet(force: boolean): void {
 function applyChrome(place: boolean): void {
   if (!runtime || !petWin) return;
   const [w, h] = [Math.round(BASE_W * runtime.settings.window.scale), Math.round(BASE_H * runtime.settings.window.scale)];
-  petWin.setSize(w, h);
+  const [x, y] = petWin.getPosition();
+  petWin.setBounds({ x, y, width: w, height: h });
   petWin.setAlwaysOnTop(settingsWin?.isFocused() ? false : runtime.settings.window.alwaysOnTop, "screen-saver");
   if (place) placePet(true);
 }

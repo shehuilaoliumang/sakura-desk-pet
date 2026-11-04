@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { FORM_IDS, STATUS_LABEL, type FormId, type PackClip, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
 import { openSettings, postForm, putWindowScale, quitApp } from "../api";
 import { useBackend } from "../useBackend";
@@ -65,32 +65,58 @@ export function PetApp() {
 
   useEffect(() => {
     const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey) return;
+      if (!(event.ctrlKey || event.metaKey)) return;
       event.preventDefault();
-      const delta = event.deltaY > 0 ? -0.05 : 0.05;
+      event.stopPropagation();
+      const steps = event.deltaMode === 0 ? event.deltaY / 100 : event.deltaY;
+      const delta = steps > 0 ? -0.05 : 0.05;
       const next = Math.round(Math.min(2, Math.max(0.4, scaleRef.current + delta)) * 100) / 100;
       if (next === scaleRef.current) return;
       scaleRef.current = next;
       setZoomHint(Math.round(next * 100));
       if (hintTimer.current) window.clearTimeout(hintTimer.current);
-      hintTimer.current = window.setTimeout(() => setZoomHint(null), 800);
+      hintTimer.current = window.setTimeout(() => setZoomHint(null), 900);
       if (zoomTimer.current) window.clearTimeout(zoomTimer.current);
       zoomTimer.current = window.setTimeout(() => {
         void putWindowScale(scaleRef.current);
-      }, 80);
+      }, 40);
     };
-    window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("wheel", onWheel, { passive: false, capture: true });
     return () => {
-      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("wheel", onWheel, true);
       if (zoomTimer.current) window.clearTimeout(zoomTimer.current);
       if (hintTimer.current) window.clearTimeout(hintTimer.current);
     };
   }, []);
 
-  if (!settings || !state || !work) {
+  useEffect(() => {
+    if (!window.sakuraPet?.setMouseIgnore) return;
+    let last = true;
+    const apply = (ignore: boolean) => {
+      if (ignore === last) return;
+      last = ignore;
+      window.sakuraPet?.setMouseIgnore(ignore);
+    };
+    const onMove = (event: MouseEvent) => {
+      const el = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+      const hit = !!(el && el.closest("[data-hit]"));
+      apply(!hit);
+    };
+    const onLeave = () => apply(true);
+    window.addEventListener("mousemove", onMove);
+    document.documentElement.addEventListener("mouseleave", onLeave);
+    apply(true);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      document.documentElement.removeEventListener("mouseleave", onLeave);
+      apply(true);
+    };
+  }, []);
+
+  if (!settings || !state || !work) {  if (!settings || !state || !work) {
     return (
       <div className="pet-root loading">
-        <div className="boot-card" data-no-drag>
+        <div className="boot-card" data-no-drag data-hit>
           <span className="boot-apple" />
           <p>{backend.error ?? "樱正在过来…"}</p>
         </div>
@@ -131,6 +157,7 @@ export function PetApp() {
   return (
     <div
       className={`pet-root ${pressed ? "pressed" : ""}`}
+      style={{ ["--pet-scale" as string]: String(settings.window.scale) } as CSSProperties}
       onPointerDown={onPointerDown}
       onDoubleClick={(event) => {
         if ((event.target as HTMLElement).closest("[data-no-drag]")) return;
@@ -141,7 +168,7 @@ export function PetApp() {
         setMenu({ x: event.clientX, y: event.clientY });
       }}
     >
-      <div className={`bubbles count-${activeForm === "duo" ? 2 : Math.min(lines.length, 1)}`}>
+      <div className={`bubbles count-${activeForm === "duo" ? 2 : Math.min(lines.length, 1)}`} data-hit>
         {activeForm === "duo" ? (
           <>
             <Bubble line={lines.find((line) => line.speaker === "dark")} name={settings.forms.dark.displayName} />
@@ -152,7 +179,7 @@ export function PetApp() {
         )}
       </div>
 
-      <div className="stage">
+      <div className="stage" data-hit>
         <Figure
           form={activeForm}
           mood={mood}
@@ -165,7 +192,7 @@ export function PetApp() {
         />
       </div>
 
-      <div className={`status-chip mood-${work.state}`} data-no-drag aria-live="polite">
+      <div className={`status-chip mood-${work.state}`} data-no-drag data-hit aria-live="polite">
         <span className={`lamp ${work.state}`} />
         <span>{STATUS_LABEL[work.state]}</span>
         <span className="chip-form">{displayName}</span>
@@ -173,7 +200,7 @@ export function PetApp() {
         {work.task ? <span className="chip-task">{work.task}</span> : null}
       </div>
 
-      <div className="hover-bar" data-no-drag>
+      <div className="hover-bar" data-no-drag data-hit>
         {enabled.map((id) => (
           <button key={id} type="button" aria-pressed={id === activeForm} onClick={() => void postForm(id)}>
             {settings.forms[id].displayName}
@@ -188,6 +215,7 @@ export function PetApp() {
         <div
           className="menu"
           data-no-drag
+          data-hit
           style={{ left: Math.min(menu.x, window.innerWidth - 180), top: Math.min(menu.y, window.innerHeight - 220) }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -212,7 +240,7 @@ export function PetApp() {
         </div>
       ) : null}
 
-      {zoomHint != null ? <div className="zoom-hint" data-no-drag>{zoomHint}%</div> : null}
+      {zoomHint != null ? <div className="zoom-hint" data-no-drag data-hit>{zoomHint}%</div> : null}
       {backend.error ? <p className="pet-error" data-no-drag>{backend.error}</p> : null}
     </div>
   );
