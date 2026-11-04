@@ -168,7 +168,7 @@ export function PetApp() {
         setMenu({ x: event.clientX, y: event.clientY });
       }}
     >
-      <div className={`bubbles count-${activeForm === "duo" ? 2 : Math.min(lines.length, 1)}`} data-hit>
+      <div className={`bubbles count-${bubbleCols(activeForm, lines.length, settings.window.scale)}`} data-hit>
         {activeForm === "duo" ? (
           <>
             <Bubble line={lines.find((line) => line.speaker === "dark")} name={settings.forms.dark.displayName} />
@@ -192,14 +192,6 @@ export function PetApp() {
         />
       </div>
 
-      <div className={`status-chip mood-${work.state}`} data-no-drag data-hit aria-live="polite">
-        <span className={`lamp ${work.state}`} />
-        <span>{STATUS_LABEL[work.state]}</span>
-        <span className="chip-form">{displayName}</span>
-        {sourceLabel(work) ? <span className="chip-source">{sourceLabel(work)}</span> : null}
-        {work.task ? <span className="chip-task">{work.task}</span> : null}
-      </div>
-
       {menu ? (
         <div
           className="menu"
@@ -208,6 +200,13 @@ export function PetApp() {
           style={{ left: Math.min(menu.x, window.innerWidth - 180), top: Math.min(menu.y, window.innerHeight - 220) }}
           onPointerDown={(event) => event.stopPropagation()}
         >
+          <div className="menu-status" aria-live="polite">
+            <span className={`lamp ${work.state}`} />
+            <span>{STATUS_LABEL[work.state]}</span>
+            <span className="chip-form">{displayName}</span>
+            {sourceLabel(work) ? <span className="chip-source">{sourceLabel(work)}</span> : null}
+            {work.task ? <span className="chip-task">{work.task}</span> : null}
+          </div>
           {enabled.map((id) => (
             <button key={id} type="button" onClick={() => { void postForm(id); setMenu(null); }}>
               {settings.forms[id].displayName}
@@ -235,6 +234,11 @@ export function PetApp() {
   );
 }
 
+
+function bubbleCols(form: FormId, lineCount: number, scale: number): number {
+  if (form === "duo") return scale >= 0.6 ? 2 : 1;
+  return Math.min(Math.max(lineCount, 0), 1);
+}
 function Bubble({ line, name }: { line?: SpeechLine; name: string }) {
   if (!line || !line.text) return <div className="bubble ghost" />;
   return (

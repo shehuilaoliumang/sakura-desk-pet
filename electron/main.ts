@@ -7,7 +7,7 @@ import { startServer } from "../src/main/server";
 import type http from "node:http";
 
 const BASE_W = 360;
-const BASE_H = 480;
+const BASE_H = 520;
 
 app.setName("sakura-pet");
 app.setPath("userData", dataDir());
