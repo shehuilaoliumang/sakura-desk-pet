@@ -38,6 +38,7 @@ body[data-window="settings"] { background: var(--paper); }
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+  /* padding-bottom is PET_BOTTOM_PAD in screenGeometry.ts — the figure anchors here */
   padding: 8px 12px 10px;
   user-select: none;
   cursor: grab;
