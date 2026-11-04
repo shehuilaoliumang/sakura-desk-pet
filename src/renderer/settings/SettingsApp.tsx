@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_PERSONA } from "@shared/defaults";
+import { listLlmProviders } from "@shared/llm";
 import { speakFor } from "@shared/lines";
 import { materializePersona } from "@shared/persona";
 import {
@@ -11,7 +12,7 @@ import {
   type Settings,
 } from "@shared/types";
 import { INSPIRATION_URL } from "@shared/version";
-import { postForm, postReset, putSettings, quitApp, reloadPack, reveal } from "../api";
+import { postForm, postLlmChat, postLlmTest, postReset, putSettings, quitApp, reloadPack, reveal } from "../api";
 import { useBackend } from "../useBackend";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -24,6 +25,11 @@ export function SettingsApp() {
   const [saveError, setSaveError] = useState("");
   const [tabooDraft, setTabooDraft] = useState("");
   const [armReset, setArmReset] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+  const [llmBusy, setLlmBusy] = useState<"test" | "chat" | null>(null);
+  const [llmNote, setLlmNote] = useState("");
+  const [llmNoteOk, setLlmNoteOk] = useState(false);
+  const [chatDraft, setChatDraft] = useState("在吗");
   const dirty = useRef(false);
   const seq = useRef(0);
   const timer = useRef<number | null>(null);
@@ -50,6 +56,39 @@ export function SettingsApp() {
   const work = backend.state.sections.workStatus.data;
   const spoken = speakFor(draft, preview, draft.activeForm);
 
+  const finishSave = (id: number, result: Awaited<ReturnType<typeof putSettings>>): boolean => {
+    if (id !== seq.current) return false;
+    if (!result.ok) {
+      setSaveState("error");
+      setSaveError("issues" in result && result.issues ? result.issues.join(" ") : result.reason ?? "没有写上");
+      return false;
+    }
+    dirty.current = false;
+    setDraft(result.settings);
+    setSaveState("saved");
+    setSaveError("");
+    return true;
+  };
+
+  const failSave = (id: number): boolean => {
+    if (id !== seq.current) return false;
+    setSaveState("error");
+    setSaveError("接口没有应答");
+    return false;
+  };
+
+  const flush = (next: Settings): Promise<boolean> => {
+    dirty.current = true;
+    setArmReset(false);
+    const id = ++seq.current;
+    if (timer.current) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    setSaveState("saving");
+    return putSettings(next).then((result) => finishSave(id, result)).catch(() => failSave(id));
+  };
+
   const schedule = (next: Settings) => {
     dirty.current = true;
     setArmReset(false);
@@ -57,22 +96,7 @@ export function SettingsApp() {
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       setSaveState("saving");
-      void putSettings(next).then((result) => {
-        if (id !== seq.current) return;
-        if (!result.ok) {
-          setSaveState("error");
-          setSaveError("issues" in result && result.issues ? result.issues.join(" ") : result.reason ?? "没有写上");
-          return;
-        }
-        dirty.current = false;
-        setDraft(result.settings);
-        setSaveState("saved");
-        setSaveError("");
-      }).catch(() => {
-        if (id !== seq.current) return;
-        setSaveState("error");
-        setSaveError("接口没有应答");
-      });
+      void putSettings(next).then((result) => finishSave(id, result)).catch(() => failSave(id));
     }, 350);
   };
 
@@ -100,6 +124,31 @@ export function SettingsApp() {
     if (!word) return;
     edit((current) => ({ ...current, tabooWords: current.tabooWords.includes(word) ? current.tabooWords : [...current.tabooWords, word] }));
     setTabooDraft("");
+  };
+
+  const askLlm = async () => {
+    const message = chatDraft.trim();
+    if (!message) return;
+    setLlmBusy("chat");
+    setLlmNote("");
+    try {
+      const saved = await flush(draft);
+      if (!saved) {
+        setLlmNoteOk(false);
+        setLlmNote("配置还没写上，这句话没有发出。");
+        return;
+      }
+      const result = await postLlmChat(message);
+      setLlmNoteOk(result.ok === true && result.source === "llm");
+      const line = result.text || "没有回音。";
+      const why = result.source === "fallback" && result.detail ? `（${result.detail}）` : "";
+      setLlmNote(`${line}${why}`);
+    } catch {
+      setLlmNoteOk(false);
+      setLlmNote("接口没有应答");
+    } finally {
+      setLlmBusy(null);
+    }
   };
 
   return (
@@ -360,6 +409,136 @@ export function SettingsApp() {
             {backend.pack ? <p className="hint">{backend.pack.name} · {backend.pack.credit}</p> : null}
           </section>
         </div>
+
+        <section className="panel span">
+          <h2>智能对话</h2>
+          <p className="hint">
+            空闲、工作、等待这些状态气泡仍用内置短句，不会在每次状态变化时去问模型。
+            模型只在你主动开口时用：这里的「试对话」、桌宠右键「问一句」，或托盘里的「试对话」（托盘发送「在吗」）。
+            没打开、没填密钥或接口地址、或请求失败时，气泡改说「……这会儿说不了。」，工作状态不动。
+            密钥只写在本机配置里。
+          </p>
+          <Switch
+            on={draft.llm.enabled}
+            label="启用智能对话"
+            onChange={(value) => edit((current) => ({ ...current, llm: { ...current.llm, enabled: value } }))}
+          />
+          <label className="field">
+            <span>提供方</span>
+            <select
+              value={draft.llm.provider}
+              onChange={(event) => edit((current) => ({ ...current, llm: { ...current.llm, provider: event.target.value } }))}
+            >
+              {listLlmProviders().map((provider) => (
+                <option key={provider.id} value={provider.id}>{provider.label}</option>
+              ))}
+              {listLlmProviders().some((provider) => provider.id === draft.llm.provider) ? null : (
+                <option value={draft.llm.provider}>{draft.llm.provider}</option>
+              )}
+            </select>
+          </label>
+          <label className="field">
+            <span>接口地址</span>
+            <input
+              value={draft.llm.baseUrl}
+              maxLength={500}
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="https://api.openai.com/v1"
+              onChange={(event) => edit((current) => ({ ...current, llm: { ...current.llm, baseUrl: event.target.value } }))}
+            />
+          </label>
+          <p className="hint">
+            例子：<code>https://api.openai.com/v1</code>、<code>https://api.deepseek.com</code>、<code>http://127.0.0.1:11434/v1</code>。
+            程序会补上 <code>/chat/completions</code>。本地服务若也要密钥，可以填任意占位。
+          </p>
+          <label className="field">
+            <span>密钥</span>
+            <input
+              type={showKey ? "text" : "password"}
+              value={draft.llm.apiKey}
+              maxLength={2000}
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="只保存在本机 settings.json"
+              onChange={(event) => edit((current) => ({ ...current, llm: { ...current.llm, apiKey: event.target.value } }))}
+            />
+          </label>
+          <div className="row-actions">
+            <button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? "隐藏密钥" : "显示密钥"}</button>
+          </div>
+          <label className="field">
+            <span>模型（可留空）</span>
+            <input
+              value={draft.llm.model}
+              maxLength={128}
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="留空则用 gpt-4o-mini"
+              onChange={(event) => edit((current) => ({ ...current, llm: { ...current.llm, model: event.target.value } }))}
+            />
+          </label>
+          <label className="field">
+            <span>超时（毫秒）</span>
+            <input
+              type="number"
+              min={500}
+              max={120000}
+              value={draft.llm.timeoutMs}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                if (!Number.isFinite(value)) return;
+                edit((current) => ({ ...current, llm: { ...current.llm, timeoutMs: value } }));
+              }}
+            />
+          </label>
+          <div className="row-actions">
+            <button
+              type="button"
+              disabled={llmBusy !== null}
+              onClick={() => {
+                setLlmBusy("test");
+                setLlmNote("");
+                void flush(draft).then(async (saved) => {
+                  if (!saved) {
+                    setLlmNoteOk(false);
+                    setLlmNote("配置还没写上，连接没有发出。");
+                    return;
+                  }
+                  const result = await postLlmTest();
+                  setLlmNoteOk(result.ok);
+                  setLlmNote(result.detail || result.reason || (result.ok ? "连上了。" : "没有连上。"));
+                }).catch(() => {
+                  setLlmNoteOk(false);
+                  setLlmNote("接口没有应答");
+                }).finally(() => setLlmBusy(null));
+              }}
+            >
+              {llmBusy === "test" ? "正在测试…" : "测试连接"}
+            </button>
+          </div>
+          <p className="hint">测试连接不要求先打开开关，也不会改桌宠身上的气泡。</p>
+          <label className="field">
+            <span>试对话</span>
+            <input
+              value={chatDraft}
+              maxLength={400}
+              placeholder="问一句"
+              onChange={(event) => setChatDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                void askLlm();
+              }}
+            />
+          </label>
+          <div className="row-actions">
+            <button type="button" disabled={llmBusy !== null || !chatDraft.trim()} onClick={() => void askLlm()}>
+              {llmBusy === "chat" ? "正在问…" : "试对话"}
+            </button>
+          </div>
+          {llmNote ? <p className={llmNoteOk ? "llm-note ok" : "llm-note bad"}>{llmNote}</p> : null}
+        </section>
 
         <section className="panel span">
           <h2>适配器</h2>

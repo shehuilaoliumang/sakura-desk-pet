@@ -77,7 +77,7 @@ async function handle(runtime: PetRuntime, req: http.IncomingMessage, res: http.
     send(res, 200, {
       ok: true,
       petId: PET_ID,
-      routes: ["state", "config", "config/meta", "anim", "broadcast", "bubble/clear", "work-status", "events", "form", "pack", "playback/{id}", "media/{form}/{file}"],
+      routes: ["state", "config", "config/meta", "anim", "broadcast", "bubble/clear", "work-status", "events", "form", "pack", "llm/chat", "llm/test", "playback/{id}", "media/{form}/{file}"],
     });
     return;
   }
@@ -228,6 +228,39 @@ async function handle(runtime: PetRuntime, req: http.IncomingMessage, res: http.
     runtime.clearBubble();
     log(req.method, url.pathname, "clear");
     send(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "POST" && stripped === "/llm/test") {
+    if (!isUser(req)) throw new HttpError(403, "user-only");
+    await readJson(req);
+    const result = await runtime.testLlm();
+    log(req.method, url.pathname, `source=${result.source} reason=${result.reason ?? "ok"}`);
+    send(res, 200, {
+      ok: result.ok,
+      source: result.source,
+      text: result.text,
+      detail: result.detail,
+      reason: result.reason,
+    });
+    return;
+  }
+
+  if (req.method === "POST" && stripped === "/llm/chat") {
+    if (!isUser(req)) throw new HttpError(403, "user-only");
+    const body = await readJson(req);
+    if (!isRecord(body) || typeof body.message !== "string" || !body.message.trim()) throw new HttpError(400, "empty-text");
+    const result = await runtime.speakWithLlm(body.message);
+    log(req.method, url.pathname, `source=${result.source} reason=${result.reason ?? "ok"} form=${runtime.settings.activeForm}`);
+    send(res, 200, {
+      ok: result.ok,
+      source: result.source,
+      text: result.text,
+      detail: result.detail,
+      reason: result.reason,
+      filtered: result.filtered,
+      activeForm: runtime.settings.activeForm,
+    });
     return;
   }
 

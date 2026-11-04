@@ -57,3 +57,26 @@ export async function reloadPack(): Promise<{ ok: boolean }> {
   const response = await fetch("/pet/pack/reload", { method: "POST", headers: userHeaders });
   return response.json() as Promise<{ ok: boolean }>;
 }
+
+export interface LlmRouteResult {
+  ok: boolean;
+  source?: "llm" | "fallback";
+  text?: string;
+  detail?: string;
+  reason?: string | null;
+  filtered?: boolean;
+}
+
+export async function postLlmTest(): Promise<LlmRouteResult> {
+  const response = await fetch("/pet/llm/test", { method: "POST", headers: userHeaders, body: "{}" });
+  return response.json() as Promise<LlmRouteResult>;
+}
+
+export async function postLlmChat(message: string): Promise<LlmRouteResult> {
+  const response = await fetch("/pet/llm/chat", {
+    method: "POST",
+    headers: userHeaders,
+    body: JSON.stringify({ message }),
+  });
+  return response.json() as Promise<LlmRouteResult>;
+}

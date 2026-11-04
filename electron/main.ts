@@ -66,6 +66,11 @@ async function boot(): Promise<void> {
 
   logDisplays();
   createPetWindow();
+  try {
+    ensureTray();
+  } catch (error) {
+    console.warn("[sakura-pet] tray unavailable", error instanceof Error ? error.name : "error");
+  }
   runtime.on("change", (reason: ChangeReason) => {
     if (reason === "settings" || reason === "reload" || reason === "form") applyChrome(reason === "reload");
   });
@@ -315,6 +320,7 @@ function ensureTray(): void {
     Menu.buildFromTemplate([
       { label: "显示桌宠", click: () => { petWin?.show(); petWin?.focus(); } },
       { label: "设置", click: () => openSettings() },
+      { label: "试对话", click: () => { void runtime?.speakWithLlm("在吗"); } },
       { type: "separator" },
       { label: "退出", click: () => app.quit() },
     ]),

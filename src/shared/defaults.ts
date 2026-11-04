@@ -1,5 +1,6 @@
 import {
   DEFAULT_DISPLAY_NAME,
+  DEFAULT_LLM_PROVIDER,
   FORM_IDS,
   FORM_SLOT,
   type FormId,
@@ -75,6 +76,14 @@ export function defaultSettings(): Settings {
       y: null,
       scale: 0.65,
       alwaysOnTop: true,
+    },
+    llm: {
+      enabled: false,
+      provider: DEFAULT_LLM_PROVIDER,
+      baseUrl: "",
+      apiKey: "",
+      model: "",
+      timeoutMs: 20_000,
     },
   };
 }

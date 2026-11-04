@@ -258,6 +258,16 @@ body[data-window="settings"] { background: var(--paper); }
   overscroll-behavior: contain;
 }
 .menu hr { width: 100%; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.12); margin: 4px 0; }
+.menu-ask { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.menu-ask input {
+  width: 100%;
+  background: rgba(255, 250, 244, 0.96);
+  color: var(--ink);
+  border: 1px solid rgba(255, 244, 236, 0.35);
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
 .menu button {
   text-align: left;
   background: transparent;
@@ -439,6 +449,16 @@ details summary { cursor: pointer; color: var(--cinnabar-deep); font-size: 13px;
   padding: 12px 0;
 }
 .adapter p { margin: 0; color: var(--muted); line-height: 1.55; }
+.llm-note { margin: 8px 0 0; font-size: 13.5px; line-height: 1.55; }
+.llm-note.ok { color: #3f7d5a; }
+.llm-note.bad { color: var(--cinnabar-deep); }
+.menu-ask input[type="text"] {
+  background: rgba(255, 250, 244, 0.96);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
 .endpoint { display: flex; gap: 10px; align-items: center; }
 .endpoint button, .quiet, .footer-meta a {
   border: 0;

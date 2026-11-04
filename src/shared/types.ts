@@ -7,6 +7,18 @@ export type PetEvent = (typeof PET_EVENTS)[number];
 export const ADAPTER_IDS = ["dsh", "codex", "webhook"] as const;
 export type AdapterId = (typeof ADAPTER_IDS)[number];
 
+/** Known ids live in the provider registry. Stored as a string so a new provider does not need a settings migration. */
+export const DEFAULT_LLM_PROVIDER = "openai-compatible";
+
+export interface LlmSettings {
+  enabled: boolean;
+  provider: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  timeoutMs: number;
+}
+
 export type Speaker = "normal" | "dark";
 
 export function isFormId(value: string): value is FormId {
@@ -89,6 +101,7 @@ export interface Settings {
     scale: number;
     alwaysOnTop: boolean;
   };
+  llm: LlmSettings;
 }
 
 export interface SpeechLine {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { bubbleStackReserve, type PetLayoutEvent } from "@shared/screenLayout";
 import { FORM_IDS, STATUS_LABEL, type FormId, type PackClip, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
-import { openSettings, postForm, putWindowScale, quitApp } from "../api";
+import { openSettings, postForm, postLlmChat, putWindowScale, quitApp } from "../api";
 import { useBackend } from "../useBackend";
 import { PetFigure } from "./figures";
 
@@ -15,6 +15,8 @@ export function PetApp() {
   const draggingRef = useRef(false);
   const [reaction, setReaction] = useState(false);
   const [zoomHint, setZoomHint] = useState<number | null>(null);
+  const [ask, setAsk] = useState("");
+  const [asking, setAsking] = useState(false);
   const [layout, setLayout] = useState<PetLayoutEvent | null>(null);
   const scaleRef = useRef(1);
   const zoomTimer = useRef<number | null>(null);
@@ -221,7 +223,7 @@ export function PetApp() {
       onContextMenu={(event) => {
         event.preventDefault();
         void (async () => {
-          const prepared = await window.sakuraPet?.prepareMenu?.({ width: 188, height: 300 });
+          const prepared = await window.sakuraPet?.prepareMenu?.({ width: 200, height: 380 });
           if (prepared) {
             setMenuPad(prepared.pad);
             setMenu({
@@ -237,12 +239,12 @@ export function PetApp() {
           // fallback: local clamp
           const stage = stageRef.current?.getBoundingClientRect();
           setMenu({
-            x: Math.max(8, Math.min(event.clientX, window.innerWidth - 196)),
-            y: Math.max(8, Math.min(event.clientY, window.innerHeight - 260)),
+            x: Math.max(8, Math.min(event.clientX, window.innerWidth - 208)),
+            y: Math.max(8, Math.min(event.clientY, window.innerHeight - 300)),
             side: "right",
             clampH: window.innerHeight - 8,
-            menuW: Math.min(188, Math.max(96, window.innerWidth - 16)),
-            menuH: Math.min(300, Math.max(120, window.innerHeight - 16)),
+            menuW: Math.min(200, Math.max(96, window.innerWidth - 16)),
+            menuH: Math.min(380, Math.max(160, window.innerHeight - 16)),
           });
           void stage;
         })();
@@ -285,6 +287,7 @@ export function PetApp() {
             maxHeight: menu.menuH ?? menu.clampH,
           }}
           onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.stopPropagation()}
         >
           <div className="menu-status" aria-live="polite">
             <span className={`lamp ${work.state}`} />
@@ -304,6 +307,34 @@ export function PetApp() {
             </button>
           ))}
           <hr />
+          <form
+            className="menu-ask"
+            data-no-drag
+            onSubmit={(event) => {
+              event.preventDefault();
+              const message = ask.trim();
+              if (!message || asking) return;
+              setAsking(true);
+              void postLlmChat(message).finally(() => {
+                setAsking(false);
+                setAsk("");
+                setMenu(null);
+                setMenuPad(null);
+                void window.sakuraPet?.restoreMenu?.();
+              });
+            }}
+          >
+            <input
+              value={ask}
+              maxLength={400}
+              placeholder="问一句"
+              aria-label="问一句"
+              data-no-drag
+              onPointerDown={(event) => event.stopPropagation()}
+              onChange={(event) => setAsk(event.target.value)}
+            />
+            <button type="submit" disabled={asking || !ask.trim()}>{asking ? "在问…" : "问一句"}</button>
+          </form>
           <button type="button" onClick={() => { openSettings(); setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.(); }}>
             设置
           </button>
