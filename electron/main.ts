@@ -36,6 +36,8 @@ let server: http.Server | null = null;
 let petWin: BrowserWindow | null = null;
 let settingsWin: BrowserWindow | null = null;
 let tray: Tray | null = null;
+/** While the context menu is open, window is expanded; content origin stays fixed on screen. */
+let menuChrome: { x: number; y: number; width: number; height: number } | null = null;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -210,6 +212,11 @@ function placePet(force: boolean): void {
 function applyChrome(place: boolean): void {
   if (!runtime || !petWin) return;
   const size = petWindowSize(runtime.settings.window.scale);
+  if (menuChrome) {
+    // keep expanded shell; refresh content origin size bookkeeping
+    menuChrome = { x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height };
+    return;
+  }
   const [x, y] = petWin.getPosition();
   petWin.setBounds({ x, y, width: size.width, height: size.height });
   petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
@@ -260,6 +267,7 @@ function wireIpc(): void {
   });
   ipcMain.on("sakura:open-settings", () => openSettings());
   ipcMain.on("sakura:quit", () => app.quit());
+
   ipcMain.handle("sakura:work-area", (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return null;
@@ -267,6 +275,148 @@ function wireIpc(): void {
     const b = win.getBounds();
     return { workArea: area, bounds: b };
   });
+
+  ipcMain.handle("sakura:prepare-menu", (event, payload?: { width?: number; height?: number; prefer?: string }) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== petWin || !runtime) return null;
+    const menuW = Math.max(168, Math.round(payload?.width ?? 188));
+    const menuH = Math.max(160, Math.round(payload?.height ?? 280));
+    const gap = 10;
+    const size = petWindowSize(runtime.settings.window.scale);
+    const area = screen.getDisplayMatching(win.getBounds()).workArea;
+    // Content origin: where the un-expanded pet window sits
+    const origin = menuChrome
+      ? { x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height }
+      : { x: win.getBounds().x, y: win.getBounds().y, width: size.width, height: size.height };
+
+    // Restore to content box first for stable math
+    win.setMinimumSize(40, 40);
+    win.setBounds(origin);
+
+    const room = {
+      right: area.x + area.width - (origin.x + origin.width),
+      left: origin.x - area.x,
+      bottom: area.y + area.height - (origin.y + origin.height),
+      top: origin.y - area.y,
+    };
+    const needX = menuW + gap;
+    const needY = menuH + gap;
+    type Side = "left" | "right" | "top" | "bottom";
+    const order: Side[] = ["left", "right", "top", "bottom"];
+    // Prefer the side with enough room; bias opposite to screen edge pressure
+    const ranked = order
+      .map((side) => {
+        const need = side === "left" || side === "right" ? needX : needY;
+        const space = room[side];
+        return { side, space, ok: space >= need, score: space + (space >= need ? 1000 : 0) };
+      })
+      .sort((a, b) => b.score - a.score);
+    const side = ranked[0].side;
+
+    const pad = { left: 0, right: 0, top: 0, bottom: 0 };
+    let bounds = { ...origin };
+    let menu = { x: 0, y: 0 };
+
+    if (side === "right") {
+      pad.right = needX;
+      bounds.width = origin.width + needX;
+      menu = { x: origin.width + gap, y: Math.max(8, origin.height - menuH - 8) };
+    } else if (side === "left") {
+      pad.left = needX;
+      bounds.x = origin.x - needX;
+      bounds.width = origin.width + needX;
+      menu = { x: gap, y: Math.max(8, origin.height - menuH - 8) };
+    } else if (side === "top") {
+      pad.top = needY;
+      bounds.y = origin.y - needY;
+      bounds.height = origin.height + needY;
+      menu = { x: Math.max(8, (origin.width - menuW) / 2 + pad.left), y: gap };
+    } else {
+      pad.bottom = needY;
+      bounds.height = origin.height + needY;
+      menu = { x: Math.max(8, (origin.width - menuW) / 2), y: origin.height + gap };
+    }
+
+    // Ensure vertical room for side-docked menus (otherwise bottom items clip)
+    if ((side === "left" || side === "right") && bounds.height < menuH + gap * 2) {
+      const extra = menuH + gap * 2 - bounds.height;
+      const up = Math.min(extra, Math.max(0, origin.y - area.y));
+      const down = extra - up;
+      bounds.y = origin.y - up;
+      bounds.height = origin.height + up + down;
+      pad.top += up;
+      pad.bottom += down;
+      menu.y = up + Math.max(gap, origin.height + up - menuH - gap);
+    }
+
+    // Clamp expanded window into work area (shift as a whole if needed)
+    if (bounds.x < area.x) bounds.x = area.x;
+    if (bounds.y < area.y) bounds.y = area.y;
+    if (bounds.x + bounds.width > area.x + area.width) bounds.x = Math.max(area.x, area.x + area.width - bounds.width);
+    if (bounds.y + bounds.height > area.y + area.height) bounds.y = Math.max(area.y, area.y + area.height - bounds.height);
+
+    // Content rectangle inside expanded window (after work-area clamp)
+    const contentX = Math.max(0, origin.x - bounds.x);
+    const contentY = Math.max(0, origin.y - bounds.y);
+    const fitH = Math.min(menuH, Math.max(120, bounds.height - 8));
+    const fitW = Math.min(menuW, Math.max(120, bounds.width - 8));
+
+    if (side === "right") {
+      menu = {
+        x: contentX + origin.width + gap,
+        y: Math.max(4, contentY + origin.height - fitH - gap),
+      };
+    } else if (side === "left") {
+      menu = {
+        x: gap,
+        y: Math.max(4, contentY + origin.height - fitH - gap),
+      };
+    } else if (side === "top") {
+      menu = {
+        x: contentX + Math.max(8, (origin.width - fitW) / 2),
+        y: gap,
+      };
+    } else {
+      menu = {
+        x: contentX + Math.max(8, (origin.width - fitW) / 2),
+        y: contentY + origin.height + gap,
+      };
+    }
+
+    menu.x = Math.max(4, Math.min(menu.x, bounds.width - fitW - 4));
+    menu.y = Math.max(4, Math.min(menu.y, bounds.height - fitH - 4));
+
+    menuChrome = { x: origin.x, y: origin.y, width: size.width, height: size.height };
+    win.setBounds(bounds);
+    return {
+      side,
+      menu,
+      pad: {
+        left: contentX,
+        top: contentY,
+        right: Math.max(0, bounds.width - contentX - origin.width),
+        bottom: Math.max(0, bounds.height - contentY - origin.height),
+      },
+      menuW: fitW,
+      menuH: fitH,
+      clampH: bounds.height - 8,
+    };
+  });
+
+  ipcMain.handle("sakura:restore-menu", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== petWin || !runtime) return false;
+    if (!menuChrome) {
+      applyChrome(false);
+      return true;
+    }
+    const size = petWindowSize(runtime.settings.window.scale);
+    win.setBounds({ x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height });
+    win.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
+    menuChrome = null;
+    return true;
+  });
+
   ipcMain.on("sakura:set-mouse-ignore", (event, ignore: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== petWin) return;

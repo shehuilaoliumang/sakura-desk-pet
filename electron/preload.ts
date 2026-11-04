@@ -1,5 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+export type PreparedMenu = {
+  side: "left" | "right" | "top" | "bottom";
+  menu: { x: number; y: number };
+  pad: { left: number; right: number; top: number; bottom: number };
+  menuW: number;
+  menuH: number;
+  clampH: number;
+};
+
 contextBridge.exposeInMainWorld("sakuraPet", {
   moveBy(dx: number, dy: number) {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
@@ -21,9 +30,12 @@ contextBridge.exposeInMainWorld("sakuraPet", {
     ipcRenderer.send("sakura:set-mouse-ignore", !!ignore);
   },
   getWorkArea() {
-    return ipcRenderer.invoke("sakura:work-area") as Promise<{
-      workArea: { x: number; y: number; width: number; height: number };
-      bounds: { x: number; y: number; width: number; height: number };
-    } | null>;
+    return ipcRenderer.invoke("sakura:work-area");
+  },
+  prepareMenu(size?: { width?: number; height?: number; prefer?: string }) {
+    return ipcRenderer.invoke("sakura:prepare-menu", size ?? {}) as Promise<PreparedMenu | null>;
+  },
+  restoreMenu() {
+    return ipcRenderer.invoke("sakura:restore-menu") as Promise<boolean>;
   },
 });

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { FORM_IDS, STATUS_LABEL, type FormId, type PackClip, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
 import { openSettings, postForm, putWindowScale, quitApp } from "../api";
 import { useBackend } from "../useBackend";
@@ -6,7 +6,8 @@ import { PetFigure } from "./figures";
 
 export function PetApp() {
   const backend = useBackend();
-  const [menu, setMenu] = useState<MenuPlacement | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; side: string; clampH: number; menuH?: number } | null>(null);
+  const [menuPad, setMenuPad] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [pressed, setPressed] = useState(false);
@@ -41,10 +42,10 @@ export function PetApp() {
       const form = byKey[event.key];
       if (form && settings?.forms[form].enabled) {
         void postForm(form);
-        setMenu(null);
+        setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.();
       }
       if (event.key === ",") openSettings();
-      if (event.key === "Escape") setMenu(null);
+      if (event.key === "Escape") setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -56,24 +57,15 @@ export function PetApp() {
 
   useEffect(() => {
     if (!menu) return;
-    const close = () => setMenu(null);
+    const close = () => {
+      setMenu(null);
+      setMenuPad(null);
+      void window.sakuraPet?.restoreMenu?.();
+    };
     window.addEventListener("pointerdown", close);
     return () => window.removeEventListener("pointerdown", close);
   }, [menu]);
 
-  useLayoutEffect(() => {
-    if (!menu || !menuRef.current) return;
-    const el = menuRef.current;
-    const mw = Math.max(160, el.offsetWidth || menu.menuW);
-    const mh = Math.max(120, el.offsetHeight || menu.menuH);
-    const next = finalizeMenuPlacement(menu, mw, mh);
-    const maxH = Math.max(120, next.clampH - 8);
-    el.style.maxHeight = maxH + "px";
-    el.style.overflowY = mh > maxH ? "auto" : "hidden";
-    if (Math.abs(next.x - menu.x) > 0.5 || Math.abs(next.y - menu.y) > 0.5 || next.side !== menu.side) {
-      setMenu(next);
-    }
-  }, [menu]);
 
 
   useEffect(() => {
@@ -174,7 +166,14 @@ export function PetApp() {
   return (
     <div
       className={`pet-root ${pressed ? "pressed" : ""}`}
-      style={{ ["--pet-scale" as string]: String(settings.window.scale) } as CSSProperties}
+      style={{
+        ["--pet-scale" as string]: String(settings.window.scale),
+        paddingLeft: menuPad?.left ? menuPad.left : undefined,
+        paddingRight: menuPad?.right ? menuPad.right : undefined,
+        paddingTop: menuPad?.top ? menuPad.top : undefined,
+        paddingBottom: menuPad?.bottom ? menuPad.bottom : undefined,
+        boxSizing: "border-box",
+      } as CSSProperties}
       onPointerDown={onPointerDown}
       onDoubleClick={(event) => {
         if ((event.target as HTMLElement).closest("[data-no-drag]")) return;
@@ -182,12 +181,22 @@ export function PetApp() {
       }}
       onContextMenu={(event) => {
         event.preventDefault();
-        const stage = stageRef.current?.getBoundingClientRect();
-        const cx = event.clientX;
-        const cy = event.clientY;
         void (async () => {
-          const geo = (await window.sakuraPet?.getWorkArea?.()) ?? null;
-          setMenu(placeContextMenu(cx, cy, stage, geo));
+          const prepared = await window.sakuraPet?.prepareMenu?.({ width: 188, height: 300 });
+          if (prepared) {
+            setMenuPad(prepared.pad);
+            setMenu({ x: prepared.menu.x, y: prepared.menu.y, side: prepared.side, clampH: prepared.clampH, menuH: prepared.menuH });
+            return;
+          }
+          // fallback: local clamp
+          const stage = stageRef.current?.getBoundingClientRect();
+          setMenu({
+            x: Math.max(8, Math.min(event.clientX, window.innerWidth - 196)),
+            y: Math.max(8, Math.min(event.clientY, window.innerHeight - 260)),
+            side: "right",
+            clampH: window.innerHeight - 8,
+          });
+          void stage;
         })();
       }}
     >
@@ -221,7 +230,7 @@ export function PetApp() {
           ref={menuRef}
           data-no-drag
           data-hit
-          style={{ left: menu.x, top: menu.y, maxHeight: Math.max(120, menu.clampH - 8) }}
+          style={{ left: menu.x, top: menu.y, maxHeight: Math.max(140, Math.min(menu.menuH ?? 300, menu.clampH - 8)) }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div className="menu-status" aria-live="polite">
@@ -232,12 +241,12 @@ export function PetApp() {
             {work.task ? <span className="chip-task">{work.task}</span> : null}
           </div>
           {enabled.map((id) => (
-            <button key={id} type="button" onClick={() => { void postForm(id); setMenu(null); }}>
+            <button key={id} type="button" onClick={() => { void postForm(id); setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.(); }}>
               {settings.forms[id].displayName}
             </button>
           ))}
           <hr />
-          <button type="button" onClick={() => { openSettings(); setMenu(null); }}>
+          <button type="button" onClick={() => { openSettings(); setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.(); }}>
             设置
           </button>
           {window.sakuraPet ? (
@@ -259,127 +268,6 @@ export function PetApp() {
 }
 
 
-
-type MenuGeo = {
-  workArea: { x: number; y: number; width: number; height: number };
-  bounds: { x: number; y: number; width: number; height: number };
-} | null;
-
-type MenuPlacement = {
-  x: number;
-  y: number;
-  side: string;
-  menuW: number;
-  menuH: number;
-  clampX: number;
-  clampY: number;
-  clampW: number;
-  clampH: number;
-  winX: number;
-  winY: number;
-  area: { x: number; y: number; width: number; height: number };
-  anchor: { left: number; top: number; right: number; bottom: number; width: number; height: number };
-  clickX: number;
-  clickY: number;
-};
-
-function visibleClamp(geo: MenuGeo) {
-  const winX = geo?.bounds.x ?? window.screenX;
-  const winY = geo?.bounds.y ?? window.screenY;
-  const area = geo?.workArea ?? {
-    x: window.screen.availLeft,
-    y: window.screen.availTop,
-    width: window.screen.availWidth,
-    height: window.screen.availHeight,
-  };
-  const vx0 = Math.max(0, area.x - winX);
-  const vy0 = Math.max(0, area.y - winY);
-  const vx1 = Math.min(window.innerWidth, area.x + area.width - winX);
-  const vy1 = Math.min(window.innerHeight, area.y + area.height - winY);
-  return {
-    winX,
-    winY,
-    area,
-    clamp: {
-      x: Math.max(4, vx0 + 4),
-      y: Math.max(4, vy0 + 4),
-      w: Math.max(40, vx1 - vx0 - 8),
-      h: Math.max(40, vy1 - vy0 - 8),
-    },
-  };
-}
-
-/** Keep the whole panel inside window∩workArea; near bottom open upward. */
-function finalizeMenuPlacement(menu: MenuPlacement, menuW: number, menuH: number): MenuPlacement {
-  const { clampX: cx, clampY: cy, clampW: cw, clampH: ch, anchor, clickX, clickY } = menu;
-  const gap = 8;
-  const usableH = Math.min(menuH, Math.max(120, ch - 8));
-  const clampPosX = (v: number) => Math.max(cx, Math.min(v, Math.max(cx, cx + cw - menuW)));
-  const clampPosY = (v: number) => Math.max(cy, Math.min(v, Math.max(cy, cy + ch - usableH)));
-
-  const room = {
-    right: menu.area.x + menu.area.width - (menu.winX + anchor.right),
-    left: menu.winX + anchor.left - menu.area.x,
-    bottom: menu.area.y + menu.area.height - (menu.winY + anchor.bottom),
-    top: menu.winY + anchor.top - menu.area.y,
-  };
-
-  // Slide vertically so a side-docked menu never spills past the work area.
-  const yBeside = clampPosY(Math.min(Math.max(anchor.top, clickY - 24), cy + ch - usableH));
-  const cands = [
-    { side: "right", x: clampPosX(anchor.right + gap), y: yBeside, score: room.right },
-    { side: "left", x: clampPosX(anchor.left - gap - menuW), y: yBeside, score: room.left },
-    { side: "top", x: clampPosX(anchor.left + (anchor.width - menuW) / 2), y: clampPosY(anchor.top - gap - usableH), score: room.top + (room.bottom < usableH ? 200 : 0) },
-    { side: "bottom", x: clampPosX(anchor.left + (anchor.width - menuW) / 2), y: clampPosY(anchor.bottom + gap), score: room.bottom },
-  ];
-
-  for (const c of cands) {
-    const sx = menu.winX + c.x;
-    const sy = menu.winY + c.y;
-    const fully =
-      sx >= menu.area.x - 1 &&
-      sy >= menu.area.y - 1 &&
-      sx + menuW <= menu.area.x + menu.area.width + 1 &&
-      sy + usableH <= menu.area.y + menu.area.height + 1;
-    c.score += fully ? 1000 : 0;
-    const overlapW = Math.max(0, Math.min(c.x + menuW, anchor.right) - Math.max(c.x, anchor.left));
-    const overlapH = Math.max(0, Math.min(c.y + usableH, anchor.bottom) - Math.max(c.y, anchor.top));
-    c.score -= (overlapW * overlapH) / Math.max(1, menuW * usableH) * 500;
-  }
-  cands.sort((a, b) => b.score - a.score);
-  const best = cands[0];
-  return { ...menu, x: best.x, y: best.y, side: best.side, menuW, menuH: usableH };
-}
-
-function placeContextMenu(
-  clickX: number,
-  clickY: number,
-  stage: DOMRect | undefined,
-  geo: MenuGeo,
-  menuW = 188,
-  menuH = 280,
-): MenuPlacement {
-  const { clamp, winX, winY, area } = visibleClamp(geo);
-  const r = stage ?? new DOMRect(clickX - 40, clickY - 40, 80, 80);
-  const seed: MenuPlacement = {
-    x: clickX,
-    y: clickY,
-    side: "right",
-    menuW,
-    menuH,
-    clampX: clamp.x,
-    clampY: clamp.y,
-    clampW: clamp.w,
-    clampH: clamp.h,
-    winX,
-    winY,
-    area,
-    anchor: { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height },
-    clickX,
-    clickY,
-  };
-  return finalizeMenuPlacement(seed, menuW, menuH);
-}
 
 function bubbleCols(form: FormId, lineCount: number, scale: number): number {
   if (form === "duo") return scale >= 0.6 ? 2 : 1;
