@@ -80,6 +80,7 @@ async function boot(): Promise<void> {
     if (reason === "settings" || reason === "reload") applyChrome(reason === "reload");
   });
   wireIpc();
+  wireDisplaySync();
 }
 
 function rendererUrl(hash: string): string | null {
@@ -190,6 +191,66 @@ function openSettings(): void {
   });
 }
 
+type Rect = { x: number; y: number; width: number; height: number };
+
+function workAreas(): Rect[] {
+  return screen.getAllDisplays().map((d) => ({ ...d.workArea }));
+}
+
+function pointInRect(r: Rect, x: number, y: number): boolean {
+  return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+}
+
+function rectAtPoint(rects: Rect[], x: number, y: number): Rect | null {
+  for (const r of rects) if (pointInRect(r, x, y)) return r;
+  return null;
+}
+
+function distToRectSq(r: Rect, x: number, y: number): number {
+  const dx = Math.max(r.x - x, 0, x - (r.x + r.width));
+  const dy = Math.max(r.y - y, 0, y - (r.y + r.height));
+  return dx * dx + dy * dy;
+}
+
+function nearestRect(rects: Rect[], x: number, y: number): Rect | null {
+  let best: Rect | null = null;
+  let bestD = Infinity;
+  for (const r of rects) {
+    const d = distToRectSq(r, x, y);
+    if (d < bestD) {
+      bestD = d;
+      best = r;
+    }
+  }
+  return best;
+}
+
+/** Keep a point inside the union of work areas (snap to nearest screen if in a gap). */
+function clampPointToDisplays(x: number, y: number): { x: number; y: number } {
+  const areas = workAreas();
+  if (areas.length === 0) return { x, y };
+  if (rectAtPoint(areas, x, y)) return { x, y };
+  const r = nearestRect(areas, x, y);
+  if (!r) return { x, y };
+  return {
+    x: Math.min(Math.max(x, r.x), r.x + r.width - 1),
+    y: Math.min(Math.max(y, r.y), r.y + r.height - 1),
+  };
+}
+
+/** Keep pet window center on some display; margins may overhang into bezels. */
+function clampPetOrigin(origin: Rect): Rect {
+  const cx = origin.x + origin.width / 2;
+  const cy = origin.y + origin.height / 2;
+  const c = clampPointToDisplays(cx, cy);
+  return {
+    x: Math.round(c.x - origin.width / 2),
+    y: Math.round(c.y - origin.height / 2),
+    width: origin.width,
+    height: origin.height,
+  };
+}
+
 function placePet(force: boolean): void {
   if (!runtime || !petWin) return;
   const { x, y } = runtime.settings.window;
@@ -250,18 +311,48 @@ function ensureTray(): void {
   });
 }
 
+function wireDisplaySync(): void {
+  const resync = () => {
+    if (!petWin || petWin.isDestroyed() || !runtime) return;
+    if (menuChrome) return;
+    const b = petWin.getBounds();
+    const clamped = clampPetOrigin(b);
+    if (clamped.x !== b.x || clamped.y !== b.y) {
+      petWin.setPosition(clamped.x, clamped.y);
+      runtime.setWindowPosition(clamped.x, clamped.y);
+    }
+  };
+  let t: NodeJS.Timeout | null = null;
+  const schedule = () => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => {
+      t = null;
+      resync();
+    }, 300);
+  };
+  screen.on("display-metrics-changed", schedule);
+  screen.on("display-added", schedule);
+  screen.on("display-removed", schedule);
+}
+
 function wireIpc(): void {
   ipcMain.on("sakura:move-by", (event, payload: { dx?: number; dy?: number }) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== petWin) return;
     if (typeof payload?.dx !== "number" || typeof payload?.dy !== "number") return;
     if (!Number.isFinite(payload.dx) || !Number.isFinite(payload.dy)) return;
+    // Free move across monitors — never clamp to the current display mid-drag.
     const [x, y] = win.getPosition();
     win.setPosition(Math.round(x + payload.dx), Math.round(y + payload.dy));
   });
   ipcMain.on("sakura:move-end", (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== petWin || !runtime) return;
+    const b = win.getBounds();
+    const clamped = clampPetOrigin(b);
+    if (clamped.x !== b.x || clamped.y !== b.y) {
+      win.setPosition(clamped.x, clamped.y);
+    }
     const [x, y] = win.getPosition();
     runtime.setWindowPosition(x, y);
   });
@@ -281,29 +372,40 @@ function wireIpc(): void {
     if (!win || win !== petWin || !runtime) return null;
     const menuW = Math.max(168, Math.round(payload?.width ?? 188));
     const menuH = Math.max(160, Math.round(payload?.height ?? 280));
-    const gap = 8;
+    const gap = 6; // tight to figure, almost no overlap
     const size = petWindowSize(runtime.settings.window.scale);
-    const area = screen.getDisplayMatching(win.getBounds()).workArea;
-    // Content origin: where the un-expanded pet window sits
-    const origin = menuChrome
+    // Full chrome window (un-expanded)
+    const winOrigin = menuChrome
       ? { x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height }
       : { x: win.getBounds().x, y: win.getBounds().y, width: size.width, height: size.height };
 
-    // Restore to content box first for stable math
+    // Figure/content box inside chrome — menu docks to THIS, not the wide margin edge
+    const figure = {
+      x: winOrigin.x + size.side,
+      y: winOrigin.y + size.top,
+      width: size.contentW,
+      height: size.contentH,
+    };
+
+    // Prefer the display under the figure; fall back to matching window
+    const area =
+      rectAtPoint(workAreas(), figure.x + figure.width / 2, figure.y + figure.height / 2) ??
+      screen.getDisplayMatching(win.getBounds()).workArea;
+
+    // Restore to chrome box first for stable math
     win.setMinimumSize(40, 40);
-    win.setBounds(origin);
+    win.setBounds(winOrigin);
 
     const room = {
-      right: area.x + area.width - (origin.x + origin.width),
-      left: origin.x - area.x,
-      bottom: area.y + area.height - (origin.y + origin.height),
-      top: origin.y - area.y,
+      right: area.x + area.width - (figure.x + figure.width),
+      left: figure.x - area.x,
+      bottom: area.y + area.height - (figure.y + figure.height),
+      top: figure.y - area.y,
     };
     const needX = menuW + gap;
     const needY = menuH + gap;
     type Side = "left" | "right" | "top" | "bottom";
-    // Prefer left/right (beside the figure). Only use top/bottom when both sides lack room.
-    // When hugging an edge, bias to the opposite side (贴右 → 往左弹).
+    // Prefer left/right beside the figure. Only use top/bottom when both sides lack room.
     const horiz: Side[] = room.right <= room.left ? ["left", "right"] : ["right", "left"];
     const vert: Side[] = room.bottom <= room.top ? ["top", "bottom"] : ["bottom", "top"];
     const pick = (sides: Side[], need: number): Side | null => {
@@ -315,94 +417,110 @@ function wireIpc(): void {
     const side =
       pick(horiz, needX) ??
       pick(vert, needY) ??
-      // nowhere fits: pick the roomiest side overall
       (["left", "right", "top", "bottom"] as Side[])
         .map((s) => ({ s, space: room[s] }))
         .sort((a, b) => b.space - a.space)[0].s;
 
+    // Expanded window must cover: chrome window ∪ menu (tight to figure)
+    let bounds = { ...winOrigin };
     const pad = { left: 0, right: 0, top: 0, bottom: 0 };
-    let bounds = { ...origin };
     let menu = { x: 0, y: 0 };
 
+    // Menu screen rect relative to figure, then convert to client coords after expand
+    let menuScreen = { x: 0, y: 0 };
+
     if (side === "right") {
-      pad.right = needX;
-      bounds.width = origin.width + needX;
-      menu = { x: origin.width + gap, y: Math.max(8, origin.height - menuH - 8) };
+      menuScreen = {
+        x: figure.x + figure.width + gap,
+        y: figure.y + figure.height - menuH, // bottom-align to figure
+      };
     } else if (side === "left") {
-      pad.left = needX;
-      bounds.x = origin.x - needX;
-      bounds.width = origin.width + needX;
-      menu = { x: gap, y: Math.max(8, origin.height - menuH - 8) };
+      menuScreen = {
+        x: figure.x - menuW - gap,
+        y: figure.y + figure.height - menuH,
+      };
     } else if (side === "top") {
-      pad.top = needY;
-      bounds.y = origin.y - needY;
-      bounds.height = origin.height + needY;
-      menu = { x: Math.max(8, (origin.width - menuW) / 2 + pad.left), y: gap };
+      menuScreen = {
+        x: figure.x + Math.round((figure.width - menuW) / 2),
+        y: figure.y - menuH - gap,
+      };
     } else {
-      pad.bottom = needY;
-      bounds.height = origin.height + needY;
-      menu = { x: Math.max(8, (origin.width - menuW) / 2), y: origin.height + gap };
+      menuScreen = {
+        x: figure.x + Math.round((figure.width - menuW) / 2),
+        y: figure.y + figure.height + gap,
+      };
     }
 
-    // Ensure vertical room for side-docked menus (otherwise bottom items clip)
-    if ((side === "left" || side === "right") && bounds.height < menuH + gap * 2) {
-      const extra = menuH + gap * 2 - bounds.height;
-      const up = Math.min(extra, Math.max(0, origin.y - area.y));
-      const down = extra - up;
-      bounds.y = origin.y - up;
-      bounds.height = origin.height + up + down;
-      pad.top += up;
-      pad.bottom += down;
-      menu.y = up + Math.max(gap, origin.height + up - menuH - gap);
+    // Soft vertical nudge so menu stays within current work area when possible
+    if (menuScreen.y < area.y + 4) menuScreen.y = area.y + 4;
+    if (menuScreen.y + menuH > area.y + area.height - 4) {
+      menuScreen.y = Math.max(area.y + 4, area.y + area.height - menuH - 4);
+    }
+    if (menuScreen.x < area.x + 4) menuScreen.x = area.x + 4;
+    if (menuScreen.x + menuW > area.x + area.width - 4) {
+      menuScreen.x = Math.max(area.x + 4, area.x + area.width - menuW - 4);
     }
 
-    // Clamp expanded window into work area (shift as a whole if needed)
-    if (bounds.x < area.x) bounds.x = area.x;
-    if (bounds.y < area.y) bounds.y = area.y;
-    if (bounds.x + bounds.width > area.x + area.width) bounds.x = Math.max(area.x, area.x + area.width - bounds.width);
-    if (bounds.y + bounds.height > area.y + area.height) bounds.y = Math.max(area.y, area.y + area.height - bounds.height);
+    // Expand chrome window to include menuScreen (union)
+    const unionL = Math.min(winOrigin.x, menuScreen.x - 4);
+    const unionT = Math.min(winOrigin.y, menuScreen.y - 4);
+    const unionR = Math.max(winOrigin.x + winOrigin.width, menuScreen.x + menuW + 4);
+    const unionB = Math.max(winOrigin.y + winOrigin.height, menuScreen.y + menuH + 4);
+    bounds = {
+      x: unionL,
+      y: unionT,
+      width: unionR - unionL,
+      height: unionB - unionT,
+    };
 
-    // Content rectangle inside expanded window (after work-area clamp)
-    const contentX = Math.max(0, origin.x - bounds.x);
-    const contentY = Math.max(0, origin.y - bounds.y);
+    // Clamp expanded window into the display under the figure (allow slight overhang)
+    if (bounds.x < area.x - 8) {
+      const shift = area.x - 8 - bounds.x;
+      bounds.x += shift;
+      menuScreen.x += shift;
+    }
+    if (bounds.y < area.y - 8) {
+      const shift = area.y - 8 - bounds.y;
+      bounds.y += shift;
+      menuScreen.y += shift;
+    }
+    if (bounds.x + bounds.width > area.x + area.width + 8) {
+      const shift = bounds.x + bounds.width - (area.x + area.width + 8);
+      bounds.x -= shift;
+      menuScreen.x -= shift;
+    }
+    if (bounds.y + bounds.height > area.y + area.height + 8) {
+      const shift = bounds.y + bounds.height - (area.y + area.height + 8);
+      bounds.y -= shift;
+      menuScreen.y -= shift;
+    }
+
     const fitH = Math.min(menuH, Math.max(120, bounds.height - 8));
     const fitW = Math.min(menuW, Math.max(120, bounds.width - 8));
-
-    if (side === "right") {
-      menu = {
-        x: contentX + origin.width + gap,
-        y: Math.max(4, contentY + origin.height - fitH - gap),
-      };
-    } else if (side === "left") {
-      menu = {
-        x: gap,
-        y: Math.max(4, contentY + origin.height - fitH - gap),
-      };
-    } else if (side === "top") {
-      menu = {
-        x: contentX + Math.max(8, (origin.width - fitW) / 2),
-        y: gap,
-      };
-    } else {
-      menu = {
-        x: contentX + Math.max(8, (origin.width - fitW) / 2),
-        y: contentY + origin.height + gap,
-      };
-    }
-
+    menu = {
+      x: Math.round(menuScreen.x - bounds.x),
+      y: Math.round(menuScreen.y - bounds.y),
+    };
     menu.x = Math.max(4, Math.min(menu.x, bounds.width - fitW - 4));
     menu.y = Math.max(4, Math.min(menu.y, bounds.height - fitH - 4));
 
-    menuChrome = { x: origin.x, y: origin.y, width: size.width, height: size.height };
+    const contentX = winOrigin.x - bounds.x;
+    const contentY = winOrigin.y - bounds.y;
+    pad.left = Math.max(0, contentX);
+    pad.top = Math.max(0, contentY);
+    pad.right = Math.max(0, bounds.width - contentX - winOrigin.width);
+    pad.bottom = Math.max(0, bounds.height - contentY - winOrigin.height);
+
+    menuChrome = { x: winOrigin.x, y: winOrigin.y, width: size.width, height: size.height };
     win.setBounds(bounds);
     return {
       side,
       menu,
       pad: {
-        left: contentX,
-        top: contentY,
-        right: Math.max(0, bounds.width - contentX - origin.width),
-        bottom: Math.max(0, bounds.height - contentY - origin.height),
+        left: pad.left,
+        top: pad.top,
+        right: pad.right,
+        bottom: pad.bottom,
       },
       menuW: fitW,
       menuH: fitH,
