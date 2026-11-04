@@ -2,9 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { defaultSettings } from "../shared/defaults";
+import { speakFor } from "../shared/lines";
 import { PetRuntime } from "./runtime";
 import { startServer } from "./server";
-import type { PublicState, Settings } from "../shared/types";
+import type { PetEvent, PublicState, Settings } from "../shared/types";
 
 const appRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -12,7 +14,92 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+const SPEECH_EVENTS: readonly PetEvent[] = ["idle", "thinking", "working", "waiting", "success", "error"];
+
+function chars(text: string): number {
+  return Array.from(text).length;
+}
+
+function collect(settings: Settings, event: PetEvent, form: Settings["activeForm"], draws: number): string[] {
+  const seen: string[] = [];
+  for (let index = 0; index < draws; index += 1) seen.push(speakFor(settings, event, form).text);
+  return seen;
+}
+
+function assertLineVariety(): void {
+  const base = defaultSettings();
+  for (const event of SPEECH_EVENTS) {
+    const lines = collect(base, event, "normal", 24);
+    const distinct = new Set(lines);
+    assert(distinct.size >= 6, `normal ${event} has many lines, saw ${distinct.size}`);
+    assert(lines.some((text, index) => index > 0 && text !== lines[index - 1]), `normal ${event} changes across speaks`);
+    for (const text of distinct) {
+      assert(text.includes("前辈"), `normal ${event} keeps the honorific`);
+      assert(chars(text) <= 36, `normal ${event} stays short: ${text}`);
+    }
+  }
+
+  for (const event of SPEECH_EVENTS) {
+    const lines = collect(base, event, "dark", 24);
+    const distinct = new Set(lines);
+    assert(distinct.size >= 6, `dark ${event} has many lines, saw ${distinct.size}`);
+    for (const text of distinct) {
+      assert(text.includes("前辈"), `dark ${event} uses the honorific`);
+      assert(!text.includes("请稍等"), `dark ${event} is not the soft line`);
+      assert(!text.includes("别装没看见"), `default snark stays under the sharp line: ${text}`);
+      assert(chars(text) <= 24, `dark ${event} stays short: ${text}`);
+    }
+  }
+
+  const echoSettings: Settings = { ...base, duoVoice: { darkShare: 0, dualBubble: false } };
+  for (const event of SPEECH_EVENTS) {
+    const lines = collect(echoSettings, event, "duo", 24);
+    const distinct = new Set(lines);
+    assert(distinct.size >= 6, `echo ${event} has many lines, saw ${distinct.size}`);
+    for (const text of distinct) assert(chars(text) <= 16, `echo ${event} stays short: ${text}`);
+  }
+
+  const direct: Settings = {
+    ...base,
+    darkMayAddressDirectly: true,
+    nickname: "小前",
+    snarkCap: 100,
+    tone: { intensity: 90, politeness: 80 },
+  };
+  for (const event of SPEECH_EVENTS) {
+    const lines = collect(direct, event, "dark", 24);
+    const distinct = new Set(lines);
+    assert(distinct.size >= 6, `direct ${event} has many lines, saw ${distinct.size}`);
+    for (const text of distinct) {
+      assert(text.includes("小前"), `direct ${event} uses the nickname`);
+      assert(!text.includes("前辈"), `direct ${event} drops the honorific`);
+    }
+  }
+
+  const sharp = collect(
+    { ...base, honorific: "老板", snarkCap: 100, tone: { intensity: 90, politeness: 80 } },
+    "error",
+    "dark",
+    24,
+  );
+  assert(new Set(sharp).size >= 6, "high snark error has many lines");
+  assert(sharp.some((text) => text.includes("别装没看见")), "snark cap lets the sharp line through");
+  assert(sharp.every((text) => text.includes("老板")), "high snark still uses the honorific");
+
+  const capped = collect(
+    { ...base, snarkCap: 5, tone: { intensity: 90, politeness: 80 }, darkMayAddressDirectly: true, nickname: "小前" },
+    "error",
+    "dark",
+    24,
+  );
+  assert(new Set(capped).size >= 4, "low snark error still varies");
+  assert(capped.every((text) => !text.includes("别装没看见")), "snark cap blocks the sharp line");
+  assert(capped.every((text) => text.includes("小前") && !text.includes("老板")), "low snark direct address stays on the nickname");
+  assert(capped.some((text) => text.includes("出岔子了")), "low snark still has the mild fault line");
+}
+
 async function main(): Promise<void> {
+  assertLineVariety();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-pet-"));
   const runtime = new PetRuntime({ dataDir, appRoot });
   runtime.load();
@@ -95,14 +182,15 @@ async function main(): Promise<void> {
     await call(base, "POST", "/pet/form", { form: "dark" }, user);
     await call(base, "POST", "/pet/work-status", { state: "error", task: "看上限" });
     state = await stateOf(base);
-    assert(state.pets.sakura.say.data.text.includes("别装没看见"), "snark cap lets the sharp line through");
     assert(state.pets.sakura.say.data.text.includes("老板"), "dark still uses the honorific");
+    assert(!state.pets.sakura.say.data.text.includes("请稍等"), "dark error is not the soft line");
 
     await call(base, "PUT", "/pet/config", { snarkCap: 5, tone: { intensity: 90, politeness: 80 }, darkMayAddressDirectly: true, nickname: "小前" }, user);
     await call(base, "POST", "/pet/work-status", { state: "error", task: "压住" });
     state = await stateOf(base);
-    assert(state.pets.sakura.say.data.text.includes("出岔子了"), "snark cap blocks the sharp line");
+    assert(state.pets.sakura.say.data.text.includes("小前"), "capped dark uses the nickname");
     assert(!state.pets.sakura.say.data.text.includes("别装没看见"), "sharp line absent");
+    assert(!state.pets.sakura.say.data.text.includes("老板"), "capped dark drops the honorific");
     await call(base, "POST", "/pet/work-status", { state: "idle" });
     state = await stateOf(base);
     assert(state.pets.sakura.say.data.text.includes("小前"), "direct address uses the nickname");

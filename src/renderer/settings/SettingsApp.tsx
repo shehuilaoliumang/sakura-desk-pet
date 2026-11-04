@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_PERSONA } from "@shared/defaults";
 import { speakFor } from "@shared/lines";
 import { materializePersona } from "@shared/persona";
@@ -36,7 +36,28 @@ export function SettingsApp() {
     if (timer.current) window.clearTimeout(timer.current);
   }, []);
 
-  if (!draft || !backend.state) {
+  const speechKey = draft
+    ? JSON.stringify({
+        preview,
+        form: draft.activeForm,
+        honorific: draft.honorific,
+        nickname: draft.nickname,
+        direct: draft.darkMayAddressDirectly,
+        snark: draft.snarkCap,
+        intensity: draft.tone.intensity,
+        politeness: draft.tone.politeness,
+        share: draft.duoVoice.darkShare,
+        dual: draft.duoVoice.dualBubble,
+        taboo: draft.tabooWords,
+      })
+    : "";
+  const spoken = useMemo(
+    () => (draft ? speakFor(draft, preview, draft.activeForm) : null),
+    // speechKey already folds in every field that changes the line.
+    [speechKey],
+  );
+
+  if (!draft || !backend.state || !spoken) {
     return (
       <main className="settings-root">
         <div className="settings-wrap">
@@ -48,7 +69,6 @@ export function SettingsApp() {
 
   const serverForm = backend.state.sections.config.data.activeForm;
   const work = backend.state.sections.workStatus.data;
-  const spoken = speakFor(draft, preview, draft.activeForm);
 
   const schedule = (next: Settings) => {
     dirty.current = true;
@@ -226,7 +246,7 @@ export function SettingsApp() {
                   </button>
                 ))}
               </div>
-              <p className="preview-note">预听当前旋钮，不会改桌宠身上的状态。</p>
+              <p className="preview-note">预听当前旋钮，不会改桌宠身上的状态。桌宠每次换状态，会从这一档里另抽一句。</p>
               {spoken.lines.map((line) => (
                 <div key={`${line.speaker}-${line.text}`}>
                   <span className="who">{line.speaker === "dark" ? draft.forms.dark.displayName : draft.forms.normal.displayName}</span>
