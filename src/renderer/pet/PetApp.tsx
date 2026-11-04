@@ -200,17 +200,6 @@ export function PetApp() {
         {work.task ? <span className="chip-task">{work.task}</span> : null}
       </div>
 
-      <div className="hover-bar" data-no-drag data-hit>
-        {enabled.map((id) => (
-          <button key={id} type="button" aria-pressed={id === activeForm} onClick={() => void postForm(id)}>
-            {settings.forms[id].displayName}
-          </button>
-        ))}
-        <button type="button" onClick={openSettings}>
-          设置
-        </button>
-      </div>
-
       {menu ? (
         <div
           className="menu"
