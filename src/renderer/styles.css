@@ -254,6 +254,17 @@ body[data-window="settings"] { background: var(--paper); }
 }
 .menu hr { width: 100%; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.12); margin: 4px 0; }
 .menu button { text-align: left; background: transparent; }
+.menu button[aria-pressed="true"] {
+  background: var(--cinnabar);
+  border-color: transparent;
+  color: #fff7f2;
+}
+.menu button:hover {
+  background: rgba(255, 244, 236, 0.12);
+}
+.menu button[aria-pressed="true"]:hover {
+  background: var(--cinnabar);
+}
 .menu button:hover, .hover-bar button:hover { background: rgba(196, 49, 60, 0.9); }
 .pet-error {
   position: absolute;

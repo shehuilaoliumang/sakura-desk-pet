@@ -281,7 +281,7 @@ function wireIpc(): void {
     if (!win || win !== petWin || !runtime) return null;
     const menuW = Math.max(168, Math.round(payload?.width ?? 188));
     const menuH = Math.max(160, Math.round(payload?.height ?? 280));
-    const gap = 10;
+    const gap = 8;
     const size = petWindowSize(runtime.settings.window.scale);
     const area = screen.getDisplayMatching(win.getBounds()).workArea;
     // Content origin: where the un-expanded pet window sits
@@ -302,16 +302,23 @@ function wireIpc(): void {
     const needX = menuW + gap;
     const needY = menuH + gap;
     type Side = "left" | "right" | "top" | "bottom";
-    const order: Side[] = ["left", "right", "top", "bottom"];
-    // Prefer the side with enough room; bias opposite to screen edge pressure
-    const ranked = order
-      .map((side) => {
-        const need = side === "left" || side === "right" ? needX : needY;
-        const space = room[side];
-        return { side, space, ok: space >= need, score: space + (space >= need ? 1000 : 0) };
-      })
-      .sort((a, b) => b.score - a.score);
-    const side = ranked[0].side;
+    // Prefer left/right (beside the figure). Only use top/bottom when both sides lack room.
+    // When hugging an edge, bias to the opposite side (贴右 → 往左弹).
+    const horiz: Side[] = room.right <= room.left ? ["left", "right"] : ["right", "left"];
+    const vert: Side[] = room.bottom <= room.top ? ["top", "bottom"] : ["bottom", "top"];
+    const pick = (sides: Side[], need: number): Side | null => {
+      for (const side of sides) {
+        if (room[side] >= need) return side;
+      }
+      return null;
+    };
+    const side =
+      pick(horiz, needX) ??
+      pick(vert, needY) ??
+      // nowhere fits: pick the roomiest side overall
+      (["left", "right", "top", "bottom"] as Side[])
+        .map((s) => ({ s, space: room[s] }))
+        .sort((a, b) => b.space - a.space)[0].s;
 
     const pad = { left: 0, right: 0, top: 0, bottom: 0 };
     let bounds = { ...origin };

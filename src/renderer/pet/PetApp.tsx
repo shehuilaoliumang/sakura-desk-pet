@@ -241,7 +241,12 @@ export function PetApp() {
             {work.task ? <span className="chip-task">{work.task}</span> : null}
           </div>
           {enabled.map((id) => (
-            <button key={id} type="button" onClick={() => { void postForm(id); setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.(); }}>
+            <button
+              key={id}
+              type="button"
+              aria-pressed={id === activeForm}
+              onClick={() => { void postForm(id); setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.(); }}
+            >
               {settings.forms[id].displayName}
             </button>
           ))}
