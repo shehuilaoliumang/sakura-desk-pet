@@ -14,8 +14,8 @@ function petWindowSize(scale: number): { width: number; height: number; contentW
   const contentW = Math.round(BASE_W * scale);
   const contentH = Math.round(BASE_H * scale);
   const side = Math.max(200, Math.round(contentW * WINDOW_MARGIN_RATIO));
-  const top = Math.max(96, Math.round(side * 0.55));
-  const bottom = Math.max(48, Math.round(side * 0.3));
+  const top = Math.max(56, Math.round(side * 0.28));
+  const bottom = Math.max(40, Math.round(side * 0.22));
   return {
     contentW,
     contentH,

@@ -33,12 +33,12 @@ body[data-window="settings"] { background: var(--paper); }
 .pet-root {
   height: 100%;
   overflow: hidden;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
-  gap: calc(4px * var(--pet-scale, 1));
-  padding: calc(10px * var(--pet-scale, 1)) calc(12px * var(--pet-scale, 1));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 12px 10px;
   user-select: none;
   cursor: grab;
   position: relative;
@@ -68,9 +68,11 @@ body[data-window="settings"] { background: var(--paper); }
 .bubbles {
   min-height: 0;
   width: min(100%, calc(360px * var(--pet-scale, 1)));
+  flex: 0 0 auto;
   display: grid;
   gap: 6px;
   align-items: start;
+  margin: 0;
 }
 .bubbles.count-2 { grid-template-columns: 1fr 1fr; }
 .bubbles.count-1, .bubbles.count-0 { grid-template-columns: 1fr; }
@@ -108,9 +110,11 @@ body[data-window="settings"] { background: var(--paper); }
 .bubble.echo p { font-size: 13px; }
 
 .stage {
-  min-height: 0;
+  flex: 0 0 auto;
   width: min(100%, calc(360px * var(--pet-scale, 1)));
-  height: 100%;
+  height: calc(480px * var(--pet-scale, 1));
+  max-height: calc(100% - 56px);
+  min-height: 0;
   overflow: hidden;
   display: grid;
   place-items: end center;
@@ -244,6 +248,9 @@ body[data-window="settings"] { background: var(--paper); }
   flex-direction: column;
   gap: 4px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .menu hr { width: 100%; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.12); margin: 4px 0; }
 .menu button { text-align: left; background: transparent; }
