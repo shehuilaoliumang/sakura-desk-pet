@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { PetLayoutEvent } from "../src/shared/screenLayout";
 
 export type PreparedMenu = {
   side: "left" | "right" | "top" | "bottom";
@@ -36,5 +37,13 @@ contextBridge.exposeInMainWorld("sakuraPet", {
   },
   restoreMenu() {
     return ipcRenderer.invoke("sakura:restore-menu") as Promise<boolean>;
+  },
+  getLayout() {
+    return ipcRenderer.invoke("sakura:get-layout") as Promise<PetLayoutEvent | null>;
+  },
+  onLayout(listener: (layout: PetLayoutEvent) => void) {
+    const wrapped = (_event: unknown, layout: PetLayoutEvent) => listener(layout);
+    ipcRenderer.on("sakura:layout", wrapped);
+    return () => ipcRenderer.removeListener("sakura:layout", wrapped);
   },
 });

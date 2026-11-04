@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import type { PetLayoutEvent } from "@shared/screenLayout";
 import { FORM_IDS, STATUS_LABEL, type FormId, type PackClip, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
 import { openSettings, postForm, putWindowScale, quitApp } from "../api";
 import { useBackend } from "../useBackend";
@@ -14,6 +15,7 @@ export function PetApp() {
   const draggingRef = useRef(false);
   const [reaction, setReaction] = useState(false);
   const [zoomHint, setZoomHint] = useState<number | null>(null);
+  const [layout, setLayout] = useState<PetLayoutEvent | null>(null);
   const scaleRef = useRef(1);
   const zoomTimer = useRef<number | null>(null);
   const hintTimer = useRef<number | null>(null);
@@ -72,6 +74,20 @@ export function PetApp() {
   useEffect(() => {
     if (settings?.window.scale != null) scaleRef.current = settings.window.scale;
   }, [settings?.window.scale]);
+
+  useEffect(() => {
+    const pet = window.sakuraPet;
+    if (!pet?.getLayout && !pet?.onLayout) return;
+    let alive = true;
+    void pet.getLayout?.().then((value) => {
+      if (alive && value) setLayout(value);
+    });
+    const stop = pet.onLayout?.((value) => setLayout(value));
+    return () => {
+      alive = false;
+      stop?.();
+    };
+  }, []);
 
   useEffect(() => {
     const onWheel = (event: WheelEvent) => {
@@ -140,6 +156,9 @@ export function PetApp() {
 
   const displayName = settings.forms[activeForm].displayName;
   const lines = say?.lines ?? [];
+  const layoutScale = layout?.scale ?? settings.window.scale;
+  const bubbleCount =
+    activeForm === "duo" ? (layout ? (layout.bubbleRows === 1 ? 2 : 1) : bubbleCols(activeForm, lines.length, layoutScale)) : 1;
   const enabled = FORM_IDS.filter((id) => settings.forms[id].enabled);
 
   const onPointerDown = (event: ReactPointerEvent) => {
@@ -184,7 +203,7 @@ export function PetApp() {
     <div
       className={`pet-root ${pressed ? "pressed" : ""}`}
       style={{
-        ["--pet-scale" as string]: String(settings.window.scale),
+        ["--pet-scale" as string]: String(layoutScale),
         paddingLeft: menuPad?.left ? menuPad.left : undefined,
         paddingRight: menuPad?.right ? menuPad.right : undefined,
         paddingTop: menuPad?.top ? menuPad.top : undefined,
@@ -226,7 +245,7 @@ export function PetApp() {
         })();
       }}
     >
-      <div className={`bubbles count-${bubbleCols(activeForm, lines.length, settings.window.scale)}`} data-hit>
+      <div className={`bubbles count-${bubbleCount}`} data-hit>
         {activeForm === "duo" ? (
           <>
             <Bubble line={lines.find((line) => line.speaker === "dark")} name={settings.forms.dark.displayName} />

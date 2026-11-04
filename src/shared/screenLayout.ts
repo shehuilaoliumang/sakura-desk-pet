@@ -14,6 +14,19 @@ export const MENU_EDGE = 4;
 /** Side dock is kept whenever the gutter can hold a tappable menu. Below this, use top/bottom. */
 export const SIDE_FLOOR = 72;
 
+/** Work areas no wider than a scale-1 generous window (760) get tight chrome. */
+export const NARROW_WORK_MAX = 760;
+/** Figure content stays within this fraction of the work area. */
+export const CONTENT_MAX_RATIO = 0.8;
+/** Duo bubbles sit in two columns only when each column has about this much width. */
+export const DUO_COLUMNS_MIN_W = 320;
+export const TIGHT_SIDE = 18;
+export const FIT_PAD_TOP = 8;
+export const FIT_PAD_BOTTOM = 10;
+export const BUBBLE_ROW_H = 96;
+export const STACK_GAP = 6;
+const STAGE_BASE_H = 480;
+
 export function petWindowSize(scale: number): {
   width: number;
   height: number;
@@ -36,6 +49,121 @@ export function petWindowSize(scale: number): {
     bottom,
     width: contentW + side * 2,
     height: contentH + top + bottom,
+  };
+}
+
+export type PetFormKind = "duo" | "single";
+
+export type PetLayoutEvent = {
+  scale: number;
+  narrow: boolean;
+  bubbleRows: 1 | 2;
+  contentW: number;
+  contentH: number;
+};
+
+export type PetFit = {
+  scale: number;
+  narrow: boolean;
+  /** 2 = stack duo bubbles so each line gets the full content width. */
+  bubbleRows: 1 | 2;
+  contentW: number;
+  contentH: number;
+  side: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+};
+
+function clampScale(scale: number): number {
+  if (!Number.isFinite(scale)) return 1;
+  return Math.min(2, Math.max(0.4, Math.round(scale * 100) / 100));
+}
+
+/**
+ * Window chrome for the display the pet is actually on.
+ * Wide displays keep the generous side margins. A narrow portrait drops those
+ * margins so the transparent window is only a little larger than the art, and
+ * shrinks the figure only when it would pass 80% of the work-area width.
+ * Height includes the bubble rows so stacked duo lines are not clipped.
+ */
+export function fitPetChrome(requestedScale: number, work: { width: number; height: number }, form: PetFormKind): PetFit {
+  const requested = clampScale(requestedScale);
+  const narrow = work.width <= NARROW_WORK_MAX;
+  const maxContentW = Math.max(144, Math.floor(work.width * CONTENT_MAX_RATIO));
+  let scale = requested;
+  if (narrow) {
+    while (Math.round(BASE_W * scale) > maxContentW && scale > 0.4) {
+      scale = clampScale(scale - 0.01);
+    }
+  }
+  const contentW = Math.round(BASE_W * scale);
+  const stageH = Math.round(STAGE_BASE_H * scale);
+  const bubbleRows: 1 | 2 = form !== "duo" ? 1 : narrow ? (contentW >= DUO_COLUMNS_MIN_W ? 1 : 2) : scale >= 0.6 ? 1 : 2;
+  const bubbleBlock = bubbleRows * BUBBLE_ROW_H + Math.max(0, bubbleRows - 1) * STACK_GAP;
+
+  if (!narrow) {
+    const generous = petWindowSize(requested);
+    return {
+      scale: requested,
+      narrow: false,
+      bubbleRows,
+      contentW: generous.contentW,
+      contentH: generous.contentH,
+      side: generous.side,
+      top: generous.top,
+      bottom: generous.bottom,
+      width: generous.width,
+      height: generous.height,
+    };
+  }
+
+  let side = TIGHT_SIDE;
+  let width = contentW + side * 2;
+  const maxW = Math.max(contentW + 16, work.width - 16);
+  if (width > maxW) {
+    side = Math.max(8, Math.floor((maxW - contentW) / 2));
+    width = contentW + side * 2;
+  }
+  let top = FIT_PAD_TOP;
+  let bottom = FIT_PAD_BOTTOM;
+  let contentH = bubbleBlock + STACK_GAP + stageH;
+  let height = top + contentH + bottom;
+  const maxH = Math.max(contentH, work.height - 16);
+  if (height > maxH) {
+    height = maxH;
+    const spare = height - top - bottom;
+    contentH = Math.max(stageH, spare);
+    const overflow = top + contentH + bottom - height;
+    if (overflow > 0) {
+      const take = Math.min(top, overflow);
+      top -= take;
+      bottom = Math.max(0, bottom - (overflow - take));
+      contentH = height - top - bottom;
+    }
+  }
+  return {
+    scale,
+    narrow: true,
+    bubbleRows,
+    contentW,
+    contentH,
+    side,
+    top,
+    bottom,
+    width,
+    height,
+  };
+}
+
+/** Keep the art's horizontal center and its bottom edge when chrome changes. */
+export function anchorPetBottomCenter(current: Rect, next: { width: number; height: number }): Point {
+  const cx = current.x + current.width / 2;
+  const bottom = current.y + current.height;
+  return {
+    x: Math.round(cx - next.width / 2),
+    y: Math.round(bottom - next.height),
   };
 }
 

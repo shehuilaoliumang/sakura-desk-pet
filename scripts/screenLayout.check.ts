@@ -3,8 +3,10 @@ import {
   MENU_EDGE,
   MENU_GAP,
   SIDE_FLOOR,
+  anchorPetBottomCenter,
   clampOriginKeepingCenter,
   cursorFollowOrigin,
+  fitPetChrome,
   layoutContextMenu,
   petWindowSize,
   type Rect,
@@ -211,6 +213,119 @@ assert.deepEqual(followedGap, { x: 20, y: 1090 });
   assert.ok(layout.menuH <= short.height - MENU_EDGE * 2);
   assertInside(short, menuScreen(layout), "short portrait menu");
   assertOriginStable(layout, win);
+}
+
+// Logged geometry: primary scaleFactor 2 → work 1600×952; portrait scaleFactor 1.5 → work -720,0 720×1232.
+const portraitWork: Rect = { x: -720, y: 0, width: 720, height: 1232 };
+const primaryWork: Rect = { x: 0, y: 0, width: 1600, height: 952 };
+
+{
+  const generous = petWindowSize(0.65);
+  const fit = fitPetChrome(0.65, portraitWork, "duo");
+  assert.equal(generous.width, 634, "unfitted scale 0.65 window is what covered the portrait");
+  assert.ok(generous.width > portraitWork.width * 0.8);
+  assert.equal(fit.narrow, true);
+  assert.equal(fit.scale, 0.65, "figure scale stays put when it is under 80% of the work area");
+  assert.equal(fit.contentW, 234);
+  assert.equal(fit.bubbleRows, 2, "duo bubbles stack instead of crushing into two columns");
+  assert.equal(fit.side, 18);
+  assert.equal(fit.width, 270);
+  assert.equal(fit.height, 534, "both bubble rows plus the stage fit in the window");
+  assert.ok(fit.width < portraitWork.width / 2, "tight chrome no longer spans the portrait");
+  assert.ok(fit.width <= portraitWork.width - 16);
+  assert.ok(fit.height <= portraitWork.height - 16);
+  assert.ok(fit.height > generous.height);
+}
+
+{
+  const fit = fitPetChrome(2, portraitWork, "duo");
+  assert.ok(fit.contentW <= Math.floor(portraitWork.width * 0.8));
+  assert.equal(fit.contentW, 576);
+  assert.equal(fit.scale, 1.6);
+  assert.ok(fit.width <= portraitWork.width - 16);
+  assert.ok(fit.width < petWindowSize(2).width);
+  assert.equal(fit.bubbleRows, 1, "capped duo is wide enough for side-by-side bubbles");
+  assert.ok(fit.height <= portraitWork.height - 16);
+}
+
+{
+  const fit = fitPetChrome(1, primaryWork, "single");
+  const generous = petWindowSize(1);
+  assert.equal(fit.narrow, false);
+  assert.equal(fit.width, generous.width);
+  assert.equal(fit.height, generous.height);
+  assert.equal(fit.side, generous.side);
+  assert.equal(fit.scale, 1);
+}
+
+{
+  const fit = fitPetChrome(1, portraitWork, "duo");
+  assert.equal(fit.contentW, 360);
+  assert.equal(fit.bubbleRows, 1);
+  assert.ok(fit.width <= fit.contentW + 48);
+  assert.ok(fit.width < portraitWork.width - 100);
+  const win = {
+    x: portraitWork.x + Math.round((portraitWork.width - fit.width) / 2),
+    y: 120,
+    width: fit.width,
+    height: fit.height,
+  };
+  const figure = {
+    x: win.x + fit.side,
+    y: win.y + fit.top,
+    width: fit.contentW,
+    height: fit.contentH,
+  };
+  const layout = layoutContextMenu({ winOrigin: win, figure, workArea: portraitWork, menuW: 188, menuH: 300 });
+  assert.ok(layout.side === "left" || layout.side === "right", "portrait duo menu stays beside the figure");
+  assert.ok(layout.menuW >= SIDE_FLOOR);
+  assert.equal(gapToFigure(layout.side, figure, menuScreen(layout)), MENU_GAP);
+  assertOriginStable(layout, win);
+  assertInside(portraitWork, menuScreen(layout), "portrait duo menu");
+}
+
+{
+  // Default-scale duo, the screenshot case: stacked bubbles, menu fully on the 720-wide panel.
+  const fit = fitPetChrome(0.65, portraitWork, "duo");
+  const win = {
+    x: portraitWork.x + Math.round((portraitWork.width - fit.width) / 2),
+    y: 80,
+    width: fit.width,
+    height: fit.height,
+  };
+  const figure = {
+    x: win.x + fit.side,
+    y: win.y + fit.top,
+    width: fit.contentW,
+    height: fit.contentH,
+  };
+  const layout = layoutContextMenu({ winOrigin: win, figure, workArea: portraitWork, menuW: 188, menuH: 300 });
+  assert.ok(layout.side === "left" || layout.side === "right");
+  assert.equal(layout.menuW, 188);
+  assert.equal(layout.menuH, 300);
+  assert.equal(gapToFigure(layout.side, figure, menuScreen(layout)), MENU_GAP);
+  assertOriginStable(layout, win);
+  assertInside(portraitWork, menuScreen(layout), "screenshot duo menu");
+  // Flushed against the left bezel, the menu still docks to the open side.
+  const flush = { ...win, x: portraitWork.x };
+  const flushFigure = { ...figure, x: flush.x + fit.side };
+  const flushMenu = layoutContextMenu({ winOrigin: flush, figure: flushFigure, workArea: portraitWork, menuW: 188, menuH: 300 });
+  assert.equal(flushMenu.side, "right");
+  assertInside(portraitWork, menuScreen(flushMenu), "flush-left duo menu");
+  assertOriginStable(flushMenu, flush);
+}
+
+{
+  // Drag keeps the starting size. Chrome tightens only on release, around the same center and feet.
+  const dragging = petWindowSize(0.65);
+  const release = { x: -500, y: 180, width: dragging.width, height: dragging.height };
+  const center = release.x + release.width / 2;
+  assert.ok(center >= portraitWork.x && center < portraitWork.x + portraitWork.width);
+  const fit = fitPetChrome(0.65, portraitWork, "duo");
+  const parked = anchorPetBottomCenter(release, fit);
+  assert.equal(parked.x + fit.width / 2, center);
+  assert.equal(parked.y + fit.height, release.y + release.height);
+  assert.ok(fit.width < dragging.width);
 }
 
 console.log("screenLayout checks ok");

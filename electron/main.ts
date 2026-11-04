@@ -5,11 +5,13 @@ import { dataDir } from "../src/main/paths";
 import { PetRuntime, type ChangeReason } from "../src/main/runtime";
 import { startServer } from "../src/main/server";
 import {
+  anchorPetBottomCenter,
   clampOriginKeepingCenter,
   cursorFollowOrigin,
   displayUnderPoint,
+  fitPetChrome,
   layoutContextMenu,
-  petWindowSize,
+  type PetFit,
   type Rect,
 } from "../src/shared/screenLayout";
 import type http from "node:http";
@@ -65,7 +67,7 @@ async function boot(): Promise<void> {
   logDisplays();
   createPetWindow();
   runtime.on("change", (reason: ChangeReason) => {
-    if (reason === "settings" || reason === "reload") applyChrome(reason === "reload");
+    if (reason === "settings" || reason === "reload" || reason === "form") applyChrome(reason === "reload");
   });
   wireIpc();
   wireDisplaySync();
@@ -82,7 +84,7 @@ function rendererUrl(hash: string): string | null {
 function createPetWindow(): void {
   if (!runtime) return;
   const scale = runtime.settings.window.scale;
-  const initial = petWindowSize(scale);
+  const initial = fitPetChrome(scale, screen.getPrimaryDisplay().workArea, runtime.settings.activeForm === "duo" ? "duo" : "single");
   const icon = path.join(appRoot(), "assets", "icon.png");
   petWin = new BrowserWindow({
     ...(fs.existsSync(icon) ? { icon } : {}),
@@ -106,7 +108,7 @@ function createPetWindow(): void {
     },
   });
   petWin.setMenuBarVisibility(false);
-  petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
+  applyFloorMin(petWin);
   placePet(true);
   const dev = rendererUrl("/pet");
   if (dev) void petWin.loadURL(dev);
@@ -118,7 +120,8 @@ function createPetWindow(): void {
     console.error(`[sakura-pet] failed to load ${url} ${code} ${description}`);
   });
   petWin.setIgnoreMouseEvents(true, { forward: true });
-  petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
+  applyFloorMin(petWin);
+  petWin.webContents.on("did-finish-load", () => pushLayout());
   petWin.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
   petWin.once("ready-to-show", () => petWin?.show());
   petWin.on("closed", () => {
@@ -194,43 +197,106 @@ function logDisplays(): void {
   }
 }
 
-function applyMinSize(win: BrowserWindow): void {
-  const min = petWindowSize(0.4);
-  win.setMinimumSize(min.width, min.height);
+let currentFit: PetFit | null = null;
+
+function formKind(): "duo" | "single" {
+  return runtime?.settings.activeForm === "duo" ? "duo" : "single";
+}
+
+function pushLayout(): void {
+  if (!petWin || petWin.isDestroyed() || !currentFit) return;
+  const fit = currentFit;
+  petWin.webContents.send("sakura:layout", {
+    scale: fit.scale,
+    narrow: fit.narrow,
+    bubbleRows: fit.bubbleRows,
+    contentW: fit.contentW,
+    contentH: fit.contentH,
+  });
+}
+
+function applyFloorMin(win: BrowserWindow): void {
+  // The old minimum came from 200px side margins (about 544px wide) and stopped
+  // the window from hugging the art on the 720-wide portrait.
+  win.setMinimumSize(160, 200);
+}
+
+function applyFit(rect: Rect, fitted: PetFit): void {
+  if (!runtime || !petWin || petWin.isDestroyed()) return;
+  const same =
+    currentFit &&
+    currentFit.width === fitted.width &&
+    currentFit.height === fitted.height &&
+    currentFit.scale === fitted.scale &&
+    currentFit.bubbleRows === fitted.bubbleRows &&
+    currentFit.narrow === fitted.narrow;
+  const [x, y] = [rect.x, rect.y];
+  const cur = petWin.getBounds();
+  if (cur.x !== x || cur.y !== y || cur.width !== rect.width || cur.height !== rect.height) {
+    petWin.setMinimumSize(1, 1);
+    petWin.setBounds(rect);
+    applyFloorMin(petWin);
+  }
+  currentFit = fitted;
+  if (runtime.settings.window.x !== x || runtime.settings.window.y !== y) runtime.setWindowPosition(x, y);
+  if (!same) {
+    console.log(
+      `[sakura-pet] chrome narrow=${fitted.narrow} scale=${fitted.scale} window=${fitted.width}x${fitted.height} content=${fitted.contentW}x${fitted.contentH} side=${fitted.side} rows=${fitted.bubbleRows}`,
+    );
+  }
+  pushLayout();
+}
+
+function refitPet(): void {
+  if (!runtime || !petWin || petWin.isDestroyed() || dragSession || menuChrome) return;
+  const current = petWin.getBounds();
+  const areas = workAreas();
+  const area =
+    displayUnderPoint(areas, current.x + current.width / 2, current.y + current.height / 2) ??
+    screen.getPrimaryDisplay().workArea;
+  const fitted = fitPetChrome(runtime.settings.window.scale, area, formKind());
+  const pos = anchorPetBottomCenter(current, fitted);
+  const next = clampOriginKeepingCenter({ x: pos.x, y: pos.y, width: fitted.width, height: fitted.height }, areas);
+  applyFit(next, fitted);
 }
 
 function placePet(force: boolean): void {
   if (!runtime || !petWin) return;
   const { x, y } = runtime.settings.window;
+  const areas = workAreas();
   if (typeof x === "number" && typeof y === "number") {
-    const visible = screen.getAllDisplays().some((display) => {
-      const b = display.workArea;
-      return x >= b.x - 40 && y >= b.y - 40 && x < b.x + b.width - 20 && y < b.y + b.height - 20;
-    });
+    const visible = areas.some((b) => x >= b.x - 40 && y >= b.y - 40 && x < b.x + b.width - 20 && y < b.y + b.height - 20);
     if (visible) {
-      petWin.setPosition(x, y);
+      const area = displayUnderPoint(areas, x + 24, y + 24) ?? screen.getPrimaryDisplay().workArea;
+      const fitted = fitPetChrome(runtime.settings.window.scale, area, formKind());
+      const next = clampOriginKeepingCenter({ x, y, width: fitted.width, height: fitted.height }, areas);
+      applyFit(next, fitted);
       return;
     }
   }
   if (!force && (typeof x === "number" || typeof y === "number")) return;
   const area = screen.getPrimaryDisplay().workArea;
-  const [w, h] = petWin.getSize();
-  petWin.setPosition(Math.round(area.x + area.width - w - 40), Math.round(area.y + area.height - h - 64));
+  const fitted = fitPetChrome(runtime.settings.window.scale, area, formKind());
+  applyFit(
+    {
+      x: Math.round(area.x + area.width - fitted.width - 40),
+      y: Math.round(area.y + area.height - fitted.height - 64),
+      width: fitted.width,
+      height: fitted.height,
+    },
+    fitted,
+  );
 }
 
 function applyChrome(place: boolean): void {
   if (!runtime || !petWin || dragSession) return;
-  const size = petWindowSize(runtime.settings.window.scale);
-  if (menuChrome) {
-    // keep expanded shell; refresh content origin size bookkeeping
-    menuChrome = { x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height };
+  if (menuChrome && currentFit) {
+    menuChrome = { x: menuChrome.x, y: menuChrome.y, width: currentFit.width, height: currentFit.height };
     return;
   }
-  const [x, y] = petWin.getPosition();
-  petWin.setBounds({ x, y, width: size.width, height: size.height });
-  petWin.setMinimumSize(petWindowSize(0.4).width, petWindowSize(0.4).height);
   petWin.setAlwaysOnTop(settingsWin?.isFocused() ? false : runtime.settings.window.alwaysOnTop, "screen-saver");
   if (place) placePet(true);
+  else refitPet();
 }
 
 
@@ -263,12 +329,7 @@ function wireDisplaySync(): void {
   const resync = () => {
     if (!petWin || petWin.isDestroyed() || !runtime) return;
     if (menuChrome || dragSession) return;
-    const b = petWin.getBounds();
-    const clamped = clampOriginKeepingCenter(b, workAreas());
-    if (clamped.x !== b.x || clamped.y !== b.y) {
-      petWin.setPosition(clamped.x, clamped.y);
-      runtime.setWindowPosition(clamped.x, clamped.y);
-    }
+    refitPet();
   };
   let t: NodeJS.Timeout | null = null;
   const schedule = () => {
@@ -333,17 +394,14 @@ function finishDrag(): void {
   const origin = { x: session.lastX, y: session.lastY, width: session.width, height: session.height };
   const clamped = clampOriginKeepingCenter(origin, workAreas());
   try {
-    if (clamped.x !== origin.x || clamped.y !== origin.y) {
-      win.setBounds({ x: clamped.x, y: clamped.y, width: session.width, height: session.height });
-    }
     win.setResizable(false);
-    applyMinSize(win);
+    win.setMinimumSize(1, 1);
+    win.setBounds(clamped);
   } catch {
-    /* window is closing */
+    return;
   }
-  if (runtime && (clamped.x !== session.startX || clamped.y !== session.startY)) {
-    runtime.setWindowPosition(clamped.x, clamped.y);
-  }
+  // Size stays frozen while the cursor is down. Tighten or restore chrome only now.
+  refitPet();
 }
 
 function wireIpc(): void {
@@ -355,12 +413,11 @@ function wireIpc(): void {
     if (dragSession) {
       const prev = dragSession;
       clearDrag();
-      applyMinSize(win);
+      applyFloorMin(win);
       runtime.setWindowPosition(prev.lastX, prev.lastY);
     }
     const cursor = screen.getCursorScreenPoint();
     const bounds = win.getBounds();
-    const size = petWindowSize(runtime.settings.window.scale);
     win.setIgnoreMouseEvents(false);
     // resizable:false windows on Windows can ignore setBounds onto a monitor in
     // negative coordinates. A min size wider than the destination panel can too.
@@ -369,8 +426,8 @@ function wireIpc(): void {
     const session: DragSession = {
       offsetX: cursor.x - bounds.x,
       offsetY: cursor.y - bounds.y,
-      width: size.width,
-      height: size.height,
+      width: bounds.width,
+      height: bounds.height,
       startX: bounds.x,
       startY: bounds.y,
       lastX: bounds.x,
@@ -399,15 +456,22 @@ function wireIpc(): void {
   ipcMain.handle("sakura:prepare-menu", (event, payload?: { width?: number; height?: number; prefer?: string }) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== petWin || !runtime || dragSession) return null;
-    const size = petWindowSize(runtime.settings.window.scale);
+    const live = win.getBounds();
+    const fit =
+      currentFit ??
+      fitPetChrome(
+        runtime.settings.window.scale,
+        displayUnderPoint(workAreas(), live.x + live.width / 2, live.y + live.height / 2) ?? screen.getPrimaryDisplay().workArea,
+        formKind(),
+      );
     const winOrigin = menuChrome
-      ? { x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height }
-      : { x: win.getBounds().x, y: win.getBounds().y, width: size.width, height: size.height };
+      ? { x: menuChrome.x, y: menuChrome.y, width: fit.width, height: fit.height }
+      : { x: live.x, y: live.y, width: live.width, height: live.height };
     const figure = {
-      x: winOrigin.x + size.side,
-      y: winOrigin.y + size.top,
-      width: size.contentW,
-      height: size.contentH,
+      x: winOrigin.x + fit.side,
+      y: winOrigin.y + fit.top,
+      width: fit.contentW,
+      height: fit.contentH,
     };
     const cx = figure.x + figure.width / 2;
     const cy = figure.y + figure.height / 2;
@@ -420,7 +484,7 @@ function wireIpc(): void {
       menuW: Math.round(payload?.width ?? 188),
       menuH: Math.round(payload?.height ?? 300),
     });
-    menuChrome = { x: winOrigin.x, y: winOrigin.y, width: size.width, height: size.height };
+    menuChrome = { x: winOrigin.x, y: winOrigin.y, width: fit.width, height: fit.height };
     win.setMinimumSize(1, 1);
     win.setBounds(layout.bounds);
     return {
@@ -440,15 +504,31 @@ function wireIpc(): void {
       menuChrome = null;
       return true;
     }
-    if (!menuChrome) {
+    const saved = menuChrome;
+    menuChrome = null;
+    if (!saved) {
       applyChrome(false);
       return true;
     }
-    const size = petWindowSize(runtime.settings.window.scale);
-    win.setBounds({ x: menuChrome.x, y: menuChrome.y, width: size.width, height: size.height });
-    applyMinSize(win);
-    menuChrome = null;
+    if (currentFit) {
+      win.setMinimumSize(1, 1);
+      win.setBounds({ x: saved.x, y: saved.y, width: currentFit.width, height: currentFit.height });
+      applyFloorMin(win);
+    }
+    refitPet();
     return true;
+  });
+
+  ipcMain.handle("sakura:get-layout", () => {
+    if (!currentFit) return null;
+    const fit = currentFit;
+    return {
+      scale: fit.scale,
+      narrow: fit.narrow,
+      bubbleRows: fit.bubbleRows,
+      contentW: fit.contentW,
+      contentH: fit.contentH,
+    };
   });
 
   ipcMain.on("sakura:set-mouse-ignore", (event, ignore: unknown) => {
