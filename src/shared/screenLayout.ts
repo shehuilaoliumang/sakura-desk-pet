@@ -23,9 +23,23 @@ export const DUO_COLUMNS_MIN_W = 320;
 export const TIGHT_SIDE = 18;
 export const FIT_PAD_TOP = 8;
 export const FIT_PAD_BOTTOM = 10;
-export const BUBBLE_ROW_H = 96;
+/**
+ * One speech bubble, border-box, from styles.css:
+ * border 1+1, padding 8+9, .who up to two 16px lines + 2px margin,
+ * body up to three 14px * 1.45 lines. 96px clipped a wrapped name.
+ */
+export const BUBBLE_ROW_H = 132;
+/** Empty space above a stacked pair so the dark bubble's rounded top stays inside the window. */
+export const BUBBLE_HEADROOM = 28;
 export const STACK_GAP = 6;
 const STAGE_BASE_H = 480;
+
+/** Pixels above the stage that a window must keep free for `rows` of bubbles. */
+export function bubbleStackReserve(rows: 1 | 2): number {
+  const bubbleBlock = rows * BUBBLE_ROW_H + Math.max(0, rows - 1) * STACK_GAP;
+  const head = rows === 2 ? BUBBLE_HEADROOM : 0;
+  return FIT_PAD_TOP + head + bubbleBlock + STACK_GAP + FIT_PAD_BOTTOM;
+}
 
 export function petWindowSize(scale: number): {
   width: number;
@@ -102,8 +116,11 @@ export function fitPetChrome(requestedScale: number, work: { width: number; heig
   const stageH = Math.round(STAGE_BASE_H * scale);
   const bubbleRows: 1 | 2 = form !== "duo" ? 1 : narrow ? (contentW >= DUO_COLUMNS_MIN_W ? 1 : 2) : scale >= 0.6 ? 1 : 2;
   const bubbleBlock = bubbleRows * BUBBLE_ROW_H + Math.max(0, bubbleRows - 1) * STACK_GAP;
+  const contentH = bubbleBlock + STACK_GAP + stageH;
+  const minTop = FIT_PAD_TOP + (bubbleRows === 2 ? BUBBLE_HEADROOM : 0);
+  const neededH = minTop + contentH + FIT_PAD_BOTTOM;
 
-  if (!narrow) {
+  if (!narrow && bubbleRows < 2) {
     const generous = petWindowSize(requested);
     return {
       scale: requested,
@@ -119,6 +136,30 @@ export function fitPetChrome(requestedScale: number, work: { width: number; heig
     };
   }
 
+  if (!narrow) {
+    const generous = petWindowSize(requested);
+    const bottom = FIT_PAD_BOTTOM;
+    let top = Math.max(minTop, generous.height - contentH - bottom);
+    let height = top + contentH + bottom;
+    if (height > work.height - 16 && work.height > contentH + FIT_PAD_BOTTOM) {
+      height = work.height - 16;
+      top = Math.max(FIT_PAD_TOP, height - contentH - bottom);
+      height = top + contentH + bottom;
+    }
+    return {
+      scale: requested,
+      narrow: false,
+      bubbleRows,
+      contentW: generous.contentW,
+      contentH,
+      side: generous.side,
+      top,
+      bottom,
+      width: generous.width,
+      height,
+    };
+  }
+
   let side = TIGHT_SIDE;
   let width = contentW + side * 2;
   const maxW = Math.max(contentW + 16, work.width - 16);
@@ -126,21 +167,21 @@ export function fitPetChrome(requestedScale: number, work: { width: number; heig
     side = Math.max(8, Math.floor((maxW - contentW) / 2));
     width = contentW + side * 2;
   }
-  let top = FIT_PAD_TOP;
+  let top = minTop;
   let bottom = FIT_PAD_BOTTOM;
-  let contentH = bubbleBlock + STACK_GAP + stageH;
-  let height = top + contentH + bottom;
-  const maxH = Math.max(contentH, work.height - 16);
+  let fittedContentH = contentH;
+  let height = neededH;
+  const maxH = Math.max(fittedContentH + FIT_PAD_BOTTOM, work.height - 16);
   if (height > maxH) {
     height = maxH;
     const spare = height - top - bottom;
-    contentH = Math.max(stageH, spare);
-    const overflow = top + contentH + bottom - height;
+    fittedContentH = Math.max(stageH, spare);
+    const overflow = top + fittedContentH + bottom - height;
     if (overflow > 0) {
       const take = Math.min(top, overflow);
       top -= take;
       bottom = Math.max(0, bottom - (overflow - take));
-      contentH = height - top - bottom;
+      fittedContentH = height - top - bottom;
     }
   }
   return {
@@ -148,7 +189,7 @@ export function fitPetChrome(requestedScale: number, work: { width: number; heig
     narrow: true,
     bubbleRows,
     contentW,
-    contentH,
+    contentH: fittedContentH,
     side,
     top,
     bottom,

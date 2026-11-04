@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import type { PetLayoutEvent } from "@shared/screenLayout";
+import { bubbleStackReserve, type PetLayoutEvent } from "@shared/screenLayout";
 import { FORM_IDS, STATUS_LABEL, type FormId, type PackClip, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
 import { openSettings, postForm, putWindowScale, quitApp } from "../api";
 import { useBackend } from "../useBackend";
@@ -157,8 +157,10 @@ export function PetApp() {
   const displayName = settings.forms[activeForm].displayName;
   const lines = say?.lines ?? [];
   const layoutScale = layout?.scale ?? settings.window.scale;
+  const stackedDuo = activeForm === "duo" && layout?.bubbleRows === 2;
   const bubbleCount =
     activeForm === "duo" ? (layout ? (layout.bubbleRows === 1 ? 2 : 1) : bubbleCols(activeForm, lines.length, layoutScale)) : 1;
+  const bubbleReserve = stackedDuo ? bubbleStackReserve(2) : undefined;
   const enabled = FORM_IDS.filter((id) => settings.forms[id].enabled);
 
   const onPointerDown = (event: ReactPointerEvent) => {
@@ -204,6 +206,7 @@ export function PetApp() {
       className={`pet-root ${pressed ? "pressed" : ""}`}
       style={{
         ["--pet-scale" as string]: String(layoutScale),
+        ["--bubble-reserve" as string]: bubbleReserve != null ? `${bubbleReserve}px` : undefined,
         paddingLeft: menuPad?.left ? menuPad.left : undefined,
         paddingRight: menuPad?.right ? menuPad.right : undefined,
         paddingTop: menuPad?.top ? menuPad.top : undefined,

@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import {
+  BUBBLE_HEADROOM,
+  BUBBLE_ROW_H,
+  FIT_PAD_BOTTOM,
+  FIT_PAD_TOP,
   MENU_EDGE,
   MENU_GAP,
   SIDE_FLOOR,
+  STACK_GAP,
   anchorPetBottomCenter,
+  bubbleStackReserve,
   clampOriginKeepingCenter,
   cursorFollowOrigin,
   fitPetChrome,
@@ -230,7 +236,11 @@ const primaryWork: Rect = { x: 0, y: 0, width: 1600, height: 952 };
   assert.equal(fit.bubbleRows, 2, "duo bubbles stack instead of crushing into two columns");
   assert.equal(fit.side, 18);
   assert.equal(fit.width, 270);
-  assert.equal(fit.height, 534, "both bubble rows plus the stage fit in the window");
+  assert.ok(BUBBLE_ROW_H > 96, "row height is the real bubble box, not the old 96px cap");
+  const stage = Math.round(480 * 0.65);
+  assert.ok(fit.height >= FIT_PAD_TOP + BUBBLE_HEADROOM + (BUBBLE_ROW_H * 2 + STACK_GAP) + STACK_GAP + stage + FIT_PAD_BOTTOM);
+  assert.equal(fit.height, bubbleStackReserve(2) + stage);
+  assert.ok(fit.top >= FIT_PAD_TOP + BUBBLE_HEADROOM, "headroom above the dark bubble");
   assert.ok(fit.width < portraitWork.width / 2, "tight chrome no longer spans the portrait");
   assert.ok(fit.width <= portraitWork.width - 16);
   assert.ok(fit.height <= portraitWork.height - 16);
@@ -246,6 +256,24 @@ const primaryWork: Rect = { x: 0, y: 0, width: 1600, height: 952 };
   assert.ok(fit.width < petWindowSize(2).width);
   assert.equal(fit.bubbleRows, 1, "capped duo is wide enough for side-by-side bubbles");
   assert.ok(fit.height <= portraitWork.height - 16);
+}
+
+{
+  // Live log: wide primary, duo, scale 0.4 used to stay 544×308 and clip the upper bubble.
+  const fit = fitPetChrome(0.4, primaryWork, "duo");
+  const generous = petWindowSize(0.4);
+  assert.equal(generous.width, 544);
+  assert.equal(generous.height, 308);
+  assert.equal(fit.narrow, false);
+  assert.equal(fit.bubbleRows, 2);
+  assert.equal(fit.width, generous.width);
+  assert.equal(fit.side, generous.side);
+  assert.ok(fit.height > generous.height);
+  const stage = Math.round(480 * 0.4);
+  assert.equal(fit.height, bubbleStackReserve(2) + stage);
+  assert.ok(fit.top >= FIT_PAD_TOP + BUBBLE_HEADROOM);
+  assert.ok(fit.height <= primaryWork.height - 8);
+  assert.ok(fit.height >= FIT_PAD_TOP + BUBBLE_HEADROOM + BUBBLE_ROW_H * 2 + STACK_GAP + STACK_GAP + stage + FIT_PAD_BOTTOM);
 }
 
 {

@@ -82,7 +82,8 @@ body[data-window="settings"] { background: var(--paper); }
   margin: 0;
   border-radius: 14px;
   padding: 8px 10px 9px;
-  max-height: 96px;
+  /* Matches BUBBLE_ROW_H in screenLayout.ts. Taller than 96 so a wrapped name is not cut off. */
+  max-height: 132px;
   overflow: auto;
   /* floor so tiny pet windows don't crush text */
   font-size: 13px;
@@ -91,6 +92,7 @@ body[data-window="settings"] { background: var(--paper); }
 .bubble .who {
   display: block;
   font-size: 12px;
+  line-height: 16px;
   letter-spacing: 0.08em;
   margin-bottom: 2px;
 }
@@ -111,11 +113,12 @@ body[data-window="settings"] { background: var(--paper); }
 .bubble.echo p { font-size: 13px; }
 
 .stage {
-  flex: 0 0 auto;
   width: min(100%, calc(360px * var(--pet-scale, 1)));
   height: calc(480px * var(--pet-scale, 1));
-  max-height: calc(100% - 56px);
+  /* Leave the bubble stack inside the window. 56px was one short row and clipped the upper duo bubble. */
+  max-height: calc(100% - var(--bubble-reserve, 72px));
   min-height: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   display: grid;
   place-items: end center;
