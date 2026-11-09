@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { ChatPanel } from "./chat/ChatPanel";
 import { PetApp } from "./pet/PetApp";
 import { SettingsApp } from "./settings/SettingsApp";
 
-function readRoute(): "pet" | "settings" {
+function readRoute(): "pet" | "settings" | "chat" {
   const hash = window.location.hash.replace(/^#/, "");
-  return hash.startsWith("/settings") ? "settings" : "pet";
+  if (hash.startsWith("/settings")) return "settings";
+  if (hash.startsWith("/chat")) return "chat";
+  return "pet";
 }
 
 export function App() {
@@ -18,8 +21,15 @@ export function App() {
 
   useEffect(() => {
     document.body.dataset.window = route;
-    document.title = route === "settings" ? "樱 · 设置" : "樱";
+    document.title = route === "settings" ? "樱 · 设置" : route === "chat" ? "樱 · 对话" : "樱";
   }, [route]);
 
-  return route === "settings" ? <SettingsApp /> : <PetApp />;
+  if (route === "settings") return <SettingsApp />;
+  if (route === "chat") {
+    return <ChatPanel onClose={() => {
+      if (window.sakuraPet?.closeChat) window.sakuraPet.closeChat();
+      else window.close();
+    }} />;
+  }
+  return <PetApp />;
 }
