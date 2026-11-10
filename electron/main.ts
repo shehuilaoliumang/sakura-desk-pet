@@ -336,6 +336,10 @@ function placeChatWindow(): void {
 function openChatWindow(): void {
   if (!runtime) return;
   if (chatWin && !chatWin.isDestroyed()) {
+    if (chatWin.isVisible()) {
+      closeChatWindow();
+      return;
+    }
     placeChatWindow();
     paintSettingsChrome();
     chatWin.show();

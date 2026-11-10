@@ -200,16 +200,20 @@ export function ChatPanel({
     if ((!message && !image) || busy) return;
     setBusy(true);
     setNote("");
-    void postLlmChat(message, image ?? undefined).then((result: LlmRouteResult) => {
-      if (image && !result.ok) {
-        setNote(result.detail || "图片没有发出去");
-        setBusy(false);
+    const sentImage = image;
+    void postLlmChat(message, sentImage ?? undefined).then((result: LlmRouteResult) => {
+      if (!result.ok) {
+        setNote(result.detail || (sentImage ? "图片没有发出去" : "没有发出去"));
         return;
       }
-      onClose();
+      setText("");
+      setImage(null);
+      setNote("");
     }).catch(() => {
       setNote("接口没有应答");
+    }).finally(() => {
       setBusy(false);
+      field.current?.focus();
     });
   };
 

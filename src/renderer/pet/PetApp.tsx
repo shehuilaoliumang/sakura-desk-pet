@@ -39,8 +39,14 @@ export function PetApp() {
     setMenu(null);
     setMenuPad(null);
     void window.sakuraPet?.restoreMenu?.();
-    if (window.sakuraPet?.openChat) window.sakuraPet.openChat();
-    else setChatOpen(true);
+    if (window.sakuraPet?.openChat) {
+      window.sakuraPet.openChat();
+      return;
+    }
+    setChatOpen((open) => {
+      if (open) setChatTall(false);
+      return !open;
+    });
   };
 
   useEffect(() => {
@@ -94,6 +100,7 @@ export function PetApp() {
   useEffect(() => {
     if (!chatOpen || window.sakuraPet?.openChat) return;
     const close = (event: PointerEvent) => {
+      if (event.button !== 0) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest(".chat-dock") || target?.closest(".menu")) return;
       setChatOpen(false);
@@ -114,6 +121,7 @@ export function PetApp() {
         return;
       }
       if ((event.key === "l" || event.key === "L") && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
         event.preventDefault();
         openDialogue();
         return;
