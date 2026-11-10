@@ -234,6 +234,7 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   const prompt = buildChatSystemPrompt(fresh);
   assert(prompt.includes("老板"), "chat prompt keeps the honorific");
   assert(prompt.includes("黑樱"), "chat prompt keeps the active form");
+  assert(prompt.includes("||"), "duo chat asks both voices for a line");
 
   const realFetch = globalThis.fetch;
   let externalCalls = 0;
@@ -241,7 +242,8 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   let sawBearer = false;
   let sawModel = false;
   let sawPrompt = false;
-  let mode: "ok" | "http" | "taboo" | "vision" = "ok";
+  let mode: "ok" | "http" | "taboo" | "vision" | "duo" | "duo-nl" = "ok";
+  let lastSystem = "";
   let sawImage = false;
   let sawReasoningEffort: unknown;
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
@@ -268,12 +270,21 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
     sawReasoningEffort = body.reasoning_effort;
     const systemRaw = body.messages?.find((item) => item.role === "system")?.content;
     const system = typeof systemRaw === "string" ? systemRaw : "";
-    if (system) sawPrompt = system.includes("老板") && system.includes("黑樱");
+    if (system) {
+      sawPrompt = system.includes("老板") && system.includes("黑樱");
+      lastSystem = system;
+    }
     const userRaw = body.messages?.find((item) => item.role === "user")?.content;
     if (Array.isArray(userRaw)) {
       sawImage = userRaw.some((part) => !!part && typeof part === "object" && (part as { type?: string }).type === "image_url");
     }
-    const content = mode === "taboo" ? "你这个笨蛋" : "在的，老板。";
+    const content = mode === "taboo"
+      ? "你这个笨蛋"
+      : mode === "duo"
+        ? "别怕。||……嗯。"
+        : mode === "duo-nl"
+          ? "别怕呀。\n……好。"
+          : "在的，老板。";
     return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -424,6 +435,40 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
     assert(settingsBytes.includes(Buffer.from("深求", "utf8")), "model name stored as UTF-8");
     assert(settingsBytes.includes(Buffer.from(secret)), "key stays in the local file");
     assert(idle.sections.config.data.activeForm === "duo", "llm checks started from duo");
+
+    mode = "duo";
+    const paired = await call(base, "POST", "/pet/llm/chat", { message: "两个人都在吗" }, user);
+    assert(paired.status === 200 && paired.json.ok === true, "duo chat succeeds");
+    state = await stateOf(base);
+    const pairedLines = state.pets.sakura.say.data.lines;
+    assert(pairedLines.length === 2, "duo chat keeps two bubbles");
+    assert(pairedLines[0]?.speaker === "dark" && pairedLines[0]?.text === "别怕。", "dark bubble is the first line");
+    assert(pairedLines[1]?.speaker === "normal" && pairedLines[1]?.text === "……嗯。", "normal bubble is the second line");
+    assert(lastSystem.includes("||"), "the live duo prompt asks for both lines");
+    assert(state.pets.sakura.say.data.origin === "broadcast", "duo chat is not a status template");
+
+    mode = "duo-nl";
+    const wrapped = await call(base, "POST", "/pet/llm/chat", { message: "换行也要两句" }, user);
+    assert(wrapped.json.ok === true, "a newline duo reply is accepted");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.lines[0]?.speaker === "dark" && state.pets.sakura.say.data.lines[0]?.text === "别怕呀。", "a newline still feeds the dark bubble");
+    assert(state.pets.sakura.say.data.lines[1]?.speaker === "normal" && state.pets.sakura.say.data.lines[1]?.text === "……好。", "a newline still feeds the normal bubble");
+
+    await call(base, "PUT", "/pet/config", { duoVoice: { dualBubble: false, darkShare: 30 } }, user);
+    mode = "ok";
+    const softer = await call(base, "POST", "/pet/llm/chat", { message: "只留一句" }, user);
+    assert(softer.json.ok === true && softer.json.text === "在的，老板。", "a single bubble still speaks one line");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.lines.length === 1 && state.pets.sakura.say.data.lines[0]?.speaker === "normal", "the softer share gives the line to 常态樱");
+    assert(lastSystem.includes("只说一句"), "a single bubble asks for one line");
+    assert(!lastSystem.includes("||"), "a single bubble does not ask for a split");
+
+    await call(base, "PUT", "/pet/config", { duoVoice: { darkShare: 80 } }, user);
+    const harder = await call(base, "POST", "/pet/llm/chat", { message: "只留黑樱" }, user);
+    assert(harder.json.text === "在的，老板。", "the darker share still speaks one line");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.lines.length === 1 && state.pets.sakura.say.data.lines[0]?.speaker === "dark", "the darker share gives the line to 黑樱");
+    await call(base, "PUT", "/pet/config", { duoVoice: { dualBubble: true, darkShare: 70 } }, user);
   } finally {
     globalThis.fetch = realFetch;
   }

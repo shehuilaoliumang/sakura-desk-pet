@@ -129,12 +129,15 @@ export function buildChatSystemPrompt(settings: Settings): string {
   const address = direct
     ? `可以直呼「${nickname || "你"}」，不必用「${honorific}」。`
     : `称呼对方为「${honorific}」。`;
+  const duoLines = form === "duo" && settings.duoVoice.dualBubble;
   return [
     persona,
-    `当前形态：${formLabel(form)}。`,
+    `当前形态：${formLabel(settings)}。`,
     address,
     toneHint(settings, form),
-    "只说一句能放进气泡的中文口语。不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。",
+    duoLines
+      ? "说两句，中间只用 || 隔开。|| 前面是黑樱的一句，后面是常态樱的一句。不要第三句，不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。"
+      : "只说一句能放进气泡的中文口语。不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。",
   ].join("\n");
 }
 
@@ -172,11 +175,17 @@ export async function chatWithLlm(
       ],
     }
     : { role: "user", content: spoken };
+  const duoLines = settings.activeForm === "duo" && settings.duoVoice.dualBubble;
+  const seen = picture.image
+    ? duoLines
+      ? "\n对方发来一张图。黑樱和常态樱各用一句说说看到的，仍用 || 隔开。"
+      : "\n对方发来一张图。用一句中文口语说说你看到的。"
+    : "";
   const messages: LlmMessage[] = [
-    { role: "system", content: picture.image ? `${buildChatSystemPrompt(settings)}\n对方发来一张图。用一句中文口语说说你看到的。` : buildChatSystemPrompt(settings) },
+    { role: "system", content: `${buildChatSystemPrompt(settings)}${seen}` },
     user,
   ];
-  return run(ready.provider, ready, messages, CHAT_MAX_TOKENS, 0.7, fetchImpl ?? defaultFetch());
+  return run(ready.provider, ready, messages, CHAT_MAX_TOKENS, 0.7, fetchImpl ?? defaultFetch(), duoLines);
 }
 
 /** Room for a thinking model to finish, then one short spoken line. */
@@ -195,9 +204,11 @@ export async function testLlmConnection(settings: Settings, fetchImpl?: LlmFetch
   return result;
 }
 
-function formLabel(form: FormId): string {
+function formLabel(settings: Settings): string {
+  const form = settings.activeForm;
   if (form === "dark") return "黑樱";
-  if (form === "duo") return "双人同框。黑樱护着常态樱，由你说一句";
+  if (form === "duo" && settings.duoVoice.dualBubble) return "双人同框。黑樱和常态樱都在，两人各说一句";
+  if (form === "duo") return settings.duoVoice.darkShare < 50 ? "双人同框。这一句由常态樱说" : "双人同框。这一句由黑樱说";
   if (form === "normal") return "常态樱";
   return "预留形态";
 }
@@ -206,7 +217,12 @@ function toneHint(settings: Settings, form: FormId): string {
   if (form === "dark" || form === "duo") {
     const cap = settings.snarkCap;
     const snark = cap < 34 ? "收着，不要刺人" : cap < 67 ? "可以硬一点，但到此为止" : "可以锋利，仍不可羞辱";
-    return `黑樱的毒舌上限：${snark}。`;
+    const dark = `黑樱的毒舌上限：${snark}。`;
+    if (form === "duo" && settings.duoVoice.dualBubble) {
+      const soft = settings.tone.politeness >= 60 ? "常态樱用敬语。" : "常态樱少用敬语，仍然温和。";
+      return `${dark}${soft}`;
+    }
+    return dark;
   }
   return settings.tone.politeness >= 60 ? "常态樱用敬语。" : "常态樱少用敬语，仍然温和。";
 }
@@ -258,6 +274,7 @@ async function run(
   maxTokens: number,
   temperature: number,
   fetchImpl: LlmFetch,
+  duoLines = false,
 ): Promise<LlmCallResult> {
   try {
     const completed = await provider.complete({
@@ -272,7 +289,7 @@ async function run(
       fetchImpl,
     });
     if (!completed.ok) return { ok: false, text: LLM_FALLBACK_LINE, source: "fallback", reason: completed.reason, detail: redact(completed.detail, ready.apiKey) };
-    const text = oneLine(completed.text);
+    const text = shapeChatReply(completed.text, duoLines);
     if (!text) return fallback("empty-reply", "接口没有返回内容");
     return { ok: true, text, source: "llm", reason: null, detail: "模型回了一句。" };
   } catch {
@@ -425,6 +442,21 @@ function httpDetail(status: number, raw: string, secret: string): string {
   }
   const extra = clip(message);
   return redact(extra ? `接口返回 ${status}：${extra}` : `接口返回 ${status}`, secret);
+}
+
+/** Keep a duo reply as 黑樱||常态樱. A single speaker stays one line. */
+function shapeChatReply(text: string, duoLines: boolean): string {
+  const cleaned = text.replace(/\u0000/g, "").trim();
+  if (!duoLines) return oneLine(cleaned);
+  const barred = cleaned.replace(/\s*[|｜]{2,}\s*/g, "||");
+  const fromBars = barred.split("||").map((part) => oneLine(part)).filter(Boolean);
+  if (fromBars.length >= 2) return `${fromBars[0]}||${fromBars[1]}`;
+  const fromLines = cleaned.split(/\n+/).map((part) => oneLine(part)).filter(Boolean);
+  if (fromLines.length >= 2) return `${fromLines[0]}||${fromLines[1]}`;
+  const flat = oneLine(cleaned);
+  const sentences = flat.split(/(?<=[。！？!?])/).map((part) => part.trim()).filter(Boolean);
+  if (sentences.length >= 2) return `${sentences[0]}||${sentences.slice(1).join("")}`;
+  return flat;
 }
 
 function oneLine(text: string): string {

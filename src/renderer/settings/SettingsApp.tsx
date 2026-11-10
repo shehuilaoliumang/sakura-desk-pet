@@ -430,7 +430,7 @@ export function SettingsApp() {
           </div>
           <div className="subblock">
             <h3>双人声部</h3>
-            <p className="hint">默认黑樱主说。关掉双气泡时，只留下占比不低于一半的那一方；正好一半时由黑樱说。两条句子用 || 分开时，广播会同时给两边。</p>
+            <p className="hint">开着双气泡时，状态短句两边都会说，主动对话也让黑樱和常态樱各一句，用 || 分开。关掉双气泡时，只留下占比不低于一半的那一方；正好一半时由黑樱说。</p>
             <div className="split-readout">
               <span>常态樱 {100 - draft.duoVoice.darkShare}%</span>
               <span>黑樱 {draft.duoVoice.darkShare}%</span>

@@ -272,7 +272,7 @@ export class PetRuntime extends EventEmitter {
     const quiet = Boolean(image) && !result.ok;
     if (quiet) return { ...result, filtered: false, spoke: false };
     this.clearBubbleTimer();
-    this.setBroadcast(result.text, chatSpeaker(this.settings.activeForm), 0, false);
+    this.setBroadcast(result.text, chatSpeaker(this.settings), 0, false);
     this.emit("change", "status");
     return { ...result, text: this.say.text || result.text, filtered: this.say.filtered, spoke: true };
   }
@@ -515,8 +515,11 @@ export class PetRuntime extends EventEmitter {
   }
 }
 
-function chatSpeaker(form: FormId): Speaker {
+function chatSpeaker(settings: Settings): Speaker | "both" {
+  const form = settings.activeForm;
+  if (form === "duo" && settings.duoVoice.dualBubble) return "both";
   if (form === "normal" || form === "form4" || form === "form5") return "normal";
+  if (form === "duo" && settings.duoVoice.darkShare < 50) return "normal";
   return "dark";
 }
 
