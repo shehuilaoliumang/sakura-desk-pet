@@ -13,6 +13,8 @@ import type { FormId, Settings } from "./types";
  *
  * When chat is disabled, missing a key or address, or the request fails, the
  * spoken line is always `LLM_FALLBACK_LINE`. The pet keeps its work status.
+ * Thinking models may put the chain in `reasoning_content` and leave `content`
+ * empty. The bubble uses only the final visible content, never that chain.
  * 「测试连接」does not require the enable switch and does not change the bubble.
  */
 
@@ -171,8 +173,13 @@ export async function chatWithLlm(
     { role: "system", content: picture.image ? `${buildChatSystemPrompt(settings)}\n对方发来一张图。用一句中文口语说说你看到的。` : buildChatSystemPrompt(settings) },
     user,
   ];
-  return run(ready.provider, ready, messages, 200, 0.7, fetchImpl ?? defaultFetch());
+  return run(ready.provider, ready, messages, CHAT_MAX_TOKENS, 0.7, fetchImpl ?? defaultFetch());
 }
+
+/** Room for a thinking model to finish, then one short spoken line. */
+const CHAT_MAX_TOKENS = 2048;
+/** One retry when the first budget was spent entirely on reasoning. */
+const CHAT_RETRY_TOKENS = 4096;
 
 export async function testLlmConnection(settings: Settings, fetchImpl?: LlmFetch): Promise<LlmCallResult> {
   const ready = prepare(settings, "test");
@@ -268,6 +275,24 @@ async function run(
 }
 
 async function completeOpenAiCompatible(input: LlmCompleteInput): Promise<LlmCompleteResult> {
+  const first = await requestCompletion(input, input.maxTokens);
+  if (first.reasoningOnly && input.maxTokens >= 256 && input.maxTokens < CHAT_RETRY_TOKENS) {
+    const second = await requestCompletion(input, CHAT_RETRY_TOKENS);
+    if (second.reasoningOnly) {
+      return { ok: false, reason: "empty-reply", detail: "模型只回了思考，没有最终的一句话。可以把超时调长后再试。" };
+    }
+    return second.result;
+  }
+  if (first.reasoningOnly) {
+    return { ok: false, reason: "empty-reply", detail: "模型只回了思考，没有最终的一句话。可以把超时调长后再试。" };
+  }
+  return first.result;
+}
+
+async function requestCompletion(
+  input: LlmCompleteInput,
+  maxTokens: number,
+): Promise<{ reasoningOnly: boolean; result: LlmCompleteResult }> {
   const url = openAiCompatibleChatUrl(input.baseUrl);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs);
@@ -282,7 +307,7 @@ async function completeOpenAiCompatible(input: LlmCompleteInput): Promise<LlmCom
         model: input.model,
         messages: input.messages,
         temperature: input.temperature,
-        max_tokens: input.maxTokens,
+        max_tokens: maxTokens,
       }),
       signal: controller.signal,
       redirect: "error",
@@ -290,39 +315,49 @@ async function completeOpenAiCompatible(input: LlmCompleteInput): Promise<LlmCom
     const raw = await response.text();
     if (!response.ok) {
       if (requestHasImage(input.messages) && visionRejected(raw)) {
-        return { ok: false, reason: "vision-unsupported", detail: "这个接口或模型不支持图片。换一个能看图的模型，或去掉图片再发。" };
+        return { reasoningOnly: false, result: { ok: false, reason: "vision-unsupported", detail: "这个接口或模型不支持图片。换一个能看图的模型，或去掉图片再发。" } };
       }
-      return { ok: false, reason: "http", detail: httpDetail(response.status, raw, input.apiKey) };
+      return { reasoningOnly: false, result: { ok: false, reason: "http", detail: httpDetail(response.status, raw, input.apiKey) } };
     }
     let payload: unknown;
     try {
       payload = JSON.parse(raw) as unknown;
     } catch {
-      return { ok: false, reason: "http", detail: "接口没有返回 JSON" };
+      return { reasoningOnly: false, result: { ok: false, reason: "http", detail: "接口没有返回 JSON" } };
     }
     if (payload && typeof payload === "object" && "error" in payload && (payload as { error?: unknown }).error) {
-      return { ok: false, reason: "http", detail: httpDetail(response.status, raw, input.apiKey) };
+      return { reasoningOnly: false, result: { ok: false, reason: "http", detail: httpDetail(response.status, raw, input.apiKey) } };
     }
-    const text = readAssistant(payload);
-    if (!text) return { ok: false, reason: "empty-reply", detail: "接口没有返回内容" };
-    return { ok: true, text };
+    const reply = readAssistant(payload);
+    if (reply.visible) return { reasoningOnly: false, result: { ok: true, text: reply.visible } };
+    if (reply.reasoningOnly) return { reasoningOnly: true, result: { ok: false, reason: "empty-reply", detail: "模型只回了思考，没有最终的一句话。可以把超时调长后再试。" } };
+    return { reasoningOnly: false, result: { ok: false, reason: "empty-reply", detail: "接口没有返回内容" } };
   } catch (error) {
-    if (isAbort(error)) return { ok: false, reason: "timeout", detail: "请求超时" };
-    if (isRedirect(error)) return { ok: false, reason: "network", detail: "请求被重定向，已中止" };
+    if (isAbort(error)) return { reasoningOnly: false, result: { ok: false, reason: "timeout", detail: "请求超时" } };
+    if (isRedirect(error)) return { reasoningOnly: false, result: { ok: false, reason: "network", detail: "请求被重定向，已中止" } };
     const message = error instanceof Error ? error.message : "";
-    return { ok: false, reason: "network", detail: redact(message ? `连不上接口：${clip(message)}` : "连不上接口", input.apiKey) };
+    return { reasoningOnly: false, result: { ok: false, reason: "network", detail: redact(message ? `连不上接口：${clip(message)}` : "连不上接口", input.apiKey) } };
   } finally {
     clearTimeout(timer);
   }
 }
 
-function readAssistant(payload: unknown): string {
-  if (!payload || typeof payload !== "object") return "";
+function readAssistant(payload: unknown): { visible: string; reasoningOnly: boolean } {
+  if (!payload || typeof payload !== "object") return { visible: "", reasoningOnly: false };
   const choices = (payload as { choices?: unknown }).choices;
-  if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== "object") return "";
+  if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== "object") return { visible: "", reasoningOnly: false };
   const message = (choices[0] as { message?: unknown }).message;
-  if (!message || typeof message !== "object") return "";
-  return readContent((message as { content?: unknown }).content);
+  if (!message || typeof message !== "object") return { visible: "", reasoningOnly: false };
+  const record = message as Record<string, unknown>;
+  const visible = stripThinking(readContent(record.content));
+  const reasoning = stripThinking(readContent(record.reasoning_content ?? record.reasoning));
+  if (visible) return { visible, reasoningOnly: false };
+  return { visible: "", reasoningOnly: reasoning.length > 0 };
+}
+
+/** Drop Qwen-style think tags so only the spoken line remains. */
+function stripThinking(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/<think>[\s\S]*$/gi, "").trim();
 }
 
 function readContent(content: unknown): string {

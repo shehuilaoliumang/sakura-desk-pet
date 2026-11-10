@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { LLM_FALLBACK_LINE, buildChatSystemPrompt, openAiCompatibleChatUrl } from "../shared/llm";
+import { defaultSettings } from "../shared/defaults";
+import { LLM_FALLBACK_LINE, buildChatSystemPrompt, chatWithLlm, openAiCompatibleChatUrl, type LlmFetch } from "../shared/llm";
 import { PetRuntime } from "./runtime";
 import { startServer } from "./server";
 import type { PublicState, Settings } from "../shared/types";
@@ -175,6 +176,7 @@ async function main(): Promise<void> {
     boot.dispose();
 
     await checkLlm(base, user, appRoot);
+    await checkReasoningReply();
 
     console.log("sakura-pet selfcheck ok");
   } finally {
@@ -439,6 +441,59 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   assert(partial.settings.honorific === "前辈", "old settings file keeps the honorific");
   partial.dispose();
   fs.rmSync(partialDir, { recursive: true, force: true });
+}
+
+async function checkReasoningReply(): Promise<void> {
+  const settings = defaultSettings();
+  settings.llm.enabled = true;
+  settings.llm.baseUrl = "http://127.0.0.1:12345/v1";
+  settings.llm.apiKey = "local-placeholder";
+  settings.llm.model = "qwen3.5-9b";
+  const thinking = "先在心里想了很久，这段不该出现在气泡里。";
+
+  const budgets: number[] = [];
+  let round = 0;
+  const retrying: LlmFetch = async (_url, init) => {
+    const body = JSON.parse(init.body) as { max_tokens?: number };
+    budgets.push(body.max_tokens ?? 0);
+    round += 1;
+    const message = round === 1
+      ? { content: "", reasoning_content: thinking }
+      : { content: `<think>${thinking}</think>在的，前辈。`, reasoning_content: thinking };
+    return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message }] }) };
+  };
+  const spoken = await chatWithLlm(settings, "在吗", retrying);
+  assert(budgets[0] === 2048 && budgets[1] === 4096, "a thinking reply gets one larger retry");
+  assert(spoken.ok && spoken.text === "在的，前辈。", "the bubble uses the final content");
+  assert(!spoken.text.includes("不该出现"), "reasoning is not spoken");
+
+  let both = 0;
+  const together: LlmFetch = async () => {
+    both += 1;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: "好的。", reasoning_content: thinking } }],
+      }),
+    };
+  };
+  const direct = await chatWithLlm(settings, "在吗", together);
+  assert(both === 1 && direct.ok && direct.text === "好的。", "content wins and skips the retry");
+
+  let stuck = 0;
+  const reasoningOnly: LlmFetch = async () => {
+    stuck += 1;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ choices: [{ message: { content: null, reasoning_content: thinking } }] }),
+    };
+  };
+  const quiet = await chatWithLlm(settings, "在吗", reasoningOnly);
+  assert(stuck === 2 && !quiet.ok && quiet.text === LLM_FALLBACK_LINE, "reasoning without a line stays on the short fallback");
+  assert(!quiet.detail.includes("不该出现"), "the failure detail does not paste the thinking");
+  assert(quiet.detail.includes("思考"), "the failure says the model only thought");
 }
 
 main().catch((error: unknown) => {
