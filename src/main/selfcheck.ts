@@ -178,6 +178,7 @@ async function main(): Promise<void> {
 
     await checkLlm(base, user, appRoot);
     await checkReasoningReply();
+    await checkDuoPartnerRetry();
 
     console.log("sakura-pet selfcheck ok");
   } finally {
@@ -238,6 +239,8 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   assert(prompt.includes("都是对用户说的"), "duo lines both address the user");
   assert(prompt.includes("称呼用户为「老板」"), "both lines use the configured honorific");
   assert(prompt.includes("不要互相接话") && prompt.includes("不要互相点评"), "duo lines must not talk to each other");
+  assert(prompt.includes("不要介绍对方") && prompt.includes("不要评价对方"), "duo lines must not describe each other");
+  assert(prompt.includes("不要出现「黑樱」") && prompt.includes("不要出现「常态樱」"), "duo lines forbid each other's names");
   assert(!prompt.includes("一句附和"), "duo prompt does not ask for an echo");
 
   const realFetch = globalThis.fetch;
@@ -450,6 +453,7 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
     assert(pairedLines[1]?.speaker === "normal" && pairedLines[1]?.text === "……嗯。", "normal bubble is the second line");
     assert(lastSystem.includes("||"), "the live duo prompt asks for both lines");
     assert(lastSystem.includes("都是对用户说的") && lastSystem.includes("不要互相接话"), "the live duo prompt keeps both lines aimed at the user");
+    assert(lastSystem.includes("不要介绍对方") && lastSystem.includes("不要出现「黑樱」"), "the live duo prompt forbids introducing the other voice");
     assert(state.pets.sakura.say.data.origin === "broadcast", "duo chat is not a status template");
 
     mode = "duo-nl";
@@ -571,6 +575,57 @@ async function checkReasoningReply(): Promise<void> {
   assert(kept.ok && kept.settings.llm.reasoningEffort === "none", "reasoning effort persists");
   const ignored = parseSettings({ llm: { reasoningEffort: "high" } });
   assert(ignored.ok && ignored.settings.llm.reasoningEffort === "auto", "unknown reasoning effort stays auto");
+}
+
+async function checkDuoPartnerRetry(): Promise<void> {
+  const settings = defaultSettings();
+  settings.activeForm = "duo";
+  settings.darkMayAddressDirectly = true;
+  settings.honorific = "前辈";
+  settings.llm.enabled = true;
+  settings.llm.baseUrl = "http://127.0.0.1:12345/v1";
+  settings.llm.apiKey = "local-placeholder";
+  settings.llm.model = "qwen3.5-9b";
+  settings.llm.reasoningEffort = "off";
+
+  let calls = 0;
+  const named = await chatWithLlm(settings, "下午好", async () => {
+    calls += 1;
+    const content = calls === 1
+      ? "下午好啊。||下午好，前辈！黑樱她平时虽然嘴硬心软，但其实是世界上最温柔的人呢。"
+      : "下午好啊。||下午好，前辈。";
+    return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content } }] }) };
+  });
+  assert(calls === 2, "naming the other voice asks once more");
+  assert(named.ok && named.text === "下午好啊。||下午好，前辈。", "the retry drops the other voice");
+  assert(!named.text.includes("黑樱"), "the spoken lines do not name 黑樱");
+
+  let cleanCalls = 0;
+  const clean = await chatWithLlm(settings, "今天还顺利吗", async () => {
+    cleanCalls += 1;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: "别用那种语调问我。||前辈辛苦了，今天还算顺利。" } }],
+      }),
+    };
+  });
+  assert(cleanCalls === 1 && clean.ok && clean.text.includes("前辈"), "addressing the user does not retry");
+  assert(!clean.text.includes("黑樱") && !clean.text.includes("常态樱"), "a clean pair names nobody else");
+
+  let guardCalls = 0;
+  const guarding = await chatWithLlm(settings, "在吗", async () => {
+    guardCalls += 1;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: "我会保护你。||在的，前辈。" } }],
+      }),
+    };
+  });
+  assert(guardCalls === 1 && guarding.ok && guarding.text.includes("前辈"), "protecting the user is not treated as mentioning the other voice");
 }
 
 async function effortOf(settings: ReturnType<typeof defaultSettings>): Promise<unknown> {

@@ -142,7 +142,15 @@ export function buildChatSystemPrompt(settings: Settings): string {
     address,
     toneHint(settings, form),
     duoLines
-      ? "说两句，中间只用 || 隔开。|| 前面只是黑樱对用户说的一句，后面只是常态樱对用户说的一句。两句各说各的，不接对方的话，不提对方的名字，不评价对方的表情或动作。不要第三句，不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。"
+      ? [
+        "说两句，中间只用 || 隔开。|| 前面是黑樱只回答用户刚才那句话，后面是常态樱只回答用户刚才那句话。",
+        "不要介绍对方，不要评价对方，不要讲谁保护谁，不要接对方的话。",
+        "常态樱那句不要出现「黑樱」。黑樱那句不要出现「常态樱」。",
+        `称呼用户为「${honorific}」可以，这不算提到对方。`,
+        `不要写成：「下午好，${honorific}！黑樱其实很温柔，请多关照。」要写成：「下午好，${honorific}。」`,
+        `不要写成：「在黑樱的保护下我们度过了这一天。」要写成：「${honorific}，今天还算顺利。」`,
+        "不要第三句，不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。",
+      ].join("")
       : "只说一句能放进气泡的中文口语，这句话是对用户说的。不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。",
   ].join("\n");
 }
@@ -184,14 +192,21 @@ export async function chatWithLlm(
   const duoLines = settings.activeForm === "duo" && settings.duoVoice.dualBubble;
   const seen = picture.image
     ? duoLines
-      ? "\n对方发来一张图。黑樱和常态樱各用一句告诉用户自己看到了什么，仍用 || 隔开。两句都对用户说，不要互相接话。"
+      ? "\n对方发来一张图。黑樱和常态樱各用一句告诉用户自己看到了什么，仍用 || 隔开。只描述画面里的东西，不要提到对方，不要评价对方。"
       : "\n对方发来一张图。用一句中文口语说说你看到的。"
     : "";
   const messages: LlmMessage[] = [
     { role: "system", content: `${buildChatSystemPrompt(settings)}${seen}` },
     user,
   ];
-  return run(ready.provider, ready, messages, CHAT_MAX_TOKENS, 0.7, fetchImpl ?? defaultFetch(), duoLines);
+  const fetch = fetchImpl ?? defaultFetch();
+  const first = await run(ready.provider, ready, messages, CHAT_MAX_TOKENS, 0.7, fetch, duoLines);
+  if (!duoLines || !first.ok || !duoReplyNamesPartner(first.text, settings)) return first;
+  const second = await run(ready.provider, ready, [
+    ...messages,
+    { role: "user", content: duoRewriteNudge(settings) },
+  ], CHAT_MAX_TOKENS, 0.7, fetch, duoLines);
+  return second.ok ? second : first;
 }
 
 /** Room for a thinking model to finish, then one short spoken line. */
@@ -448,6 +463,41 @@ function httpDetail(status: number, raw: string, secret: string): string {
   }
   const extra = clip(message);
   return redact(extra ? `接口返回 ${status}：${extra}` : `接口返回 ${status}`, secret);
+}
+
+/** True when a duo reply names the other voice. Addressing the user does not count. */
+export function duoReplyNamesPartner(text: string, settings: Settings): boolean {
+  const parts = text.split("||").map((part) => part.trim()).filter(Boolean);
+  const darkNames = namesOfVoice(settings, "normal");
+  const normalNames = namesOfVoice(settings, "dark");
+  if (parts.length < 2) {
+    const blob = parts[0] ?? "";
+    return containsAny(blob, darkNames) || containsAny(blob, normalNames);
+  }
+  return containsAny(parts[0] ?? "", darkNames) || containsAny(parts[1] ?? "", normalNames);
+}
+
+function namesOfVoice(settings: Settings, voice: "dark" | "normal"): string[] {
+  const honorific = settings.honorific.trim();
+  const nickname = settings.nickname.trim();
+  const display = settings.forms[voice].displayName.trim();
+  const builtIn = voice === "dark" ? "黑樱" : "常态樱";
+  const names = new Set<string>();
+  for (const name of [display, builtIn]) {
+    if (name.length < 2) continue;
+    if (name === honorific || name === nickname) continue;
+    names.add(name);
+  }
+  return [...names];
+}
+
+function containsAny(text: string, names: string[]): boolean {
+  return names.some((name) => text.includes(name));
+}
+
+function duoRewriteNudge(settings: Settings): string {
+  const honorific = settings.honorific.trim() || "你";
+  return `上一句提到或评价了另一个人。请重写，仍然只用 || 隔成两句。每一句只回答用户刚才的话，可以称呼用户为「${honorific}」。不要出现对方的名字，不要介绍对方，不要评价对方，不要讲谁保护谁。`;
 }
 
 /** Keep a duo reply as 黑樱||常态樱. A single speaker stays one line. */
