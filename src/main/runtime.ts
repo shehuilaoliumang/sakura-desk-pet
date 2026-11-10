@@ -44,6 +44,9 @@ export class PetRuntime extends EventEmitter {
   private packTimer: NodeJS.Timeout | null = null;
   private reloadTimer: NodeJS.Timeout | null = null;
   private bubbleTimer: NodeJS.Timeout | null = null;
+  /** Ignore a torn settings.json while our own rename is still settling. */
+  private ownWriteUntil = 0;
+  private tornStreak = 0;
   private work: WorkStatusData = {
     state: "idle",
     task: "",
@@ -437,8 +440,11 @@ export class PetRuntime extends EventEmitter {
 
   private persist(): void {
     fs.mkdirSync(this.opts.dataDir, { recursive: true });
-    const text = `${JSON.stringify(this.settings, null, 2)}\n`;
+    const text = this.serialized();
     const tmp = `${this.settingsPath}.tmp`;
+    // Windows can show the destination as empty between the replace and the
+    // watcher callback. Hold off on calling that a corrupt file.
+    this.ownWriteUntil = Date.now() + 400;
     fs.writeFileSync(tmp, text, { encoding: "utf8" });
     fs.renameSync(tmp, this.settingsPath);
   }
@@ -461,38 +467,64 @@ export class PetRuntime extends EventEmitter {
     try {
       this.dirWatcher = fs.watch(this.opts.dataDir, (_event, filename) => {
         if (filename && filename !== "settings.json") return;
-        if (this.reloadTimer) clearTimeout(this.reloadTimer);
-        this.reloadTimer = setTimeout(() => this.reloadFromDisk(), 80);
+        this.scheduleReload(80);
       });
     } catch (error) {
       this.warning = `无法监视配置目录：${error instanceof Error ? error.message : "unknown"}`;
     }
   }
 
+  private scheduleReload(ms: number): void {
+    if (this.reloadTimer) clearTimeout(this.reloadTimer);
+    this.reloadTimer = setTimeout(() => {
+      this.reloadTimer = null;
+      this.reloadFromDisk();
+    }, ms);
+  }
+
   private reloadFromDisk(): void {
     let text = "";
     try {
       text = readSettingsUtf8(this.settingsPath);
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("UTF-16") || message.includes("UTF-8")) return;
+      this.acceptDiskText("");
       return;
     }
-    if (text === this.serialized()) return;
-    try {
-      const parsed = JSON.parse(text) as unknown;
-      const result = parseSettings(parsed);
-      if (!result.ok) {
-        this.warning = `磁盘上的配置没有通过校验：${result.issues.join("；")}`;
+    this.acceptDiskText(text);
+  }
+
+  /** Apply one snapshot of settings.json. Torn reads during a form switch must not warn. */
+  acceptDiskText(text: string): void {
+    const kind = judgeSettingsSnapshot(text, this.serialized());
+    const decision = nextDiskReaction({
+      kind,
+      streak: this.tornStreak,
+      ownWrite: Date.now() < this.ownWriteUntil,
+      warning: this.warning,
+    });
+    this.tornStreak = decision.streak;
+    if (decision.schedule) this.scheduleReload(160);
+    if (kind !== "apply") {
+      if (decision.warning !== this.warning) {
+        this.warning = decision.warning;
+        this.touchConfig();
         this.emit("change", "reload");
-        return;
       }
-      const prev = this.settings;
-      this.settings = result.settings;
-      this.warning = null;
-      this.afterSettings(prev, "reload");
-    } catch {
-      this.warning = "磁盘上的配置不是合法 JSON。";
-      this.emit("change", "reload");
+      return;
     }
+    const result = parseSettings(JSON.parse(text) as unknown);
+    if (!result.ok) {
+      this.warning = `磁盘上的配置没有通过校验：${result.issues.join("；")}`;
+      this.touchConfig();
+      this.emit("change", "reload");
+      return;
+    }
+    const prev = this.settings;
+    this.settings = result.settings;
+    this.warning = null;
+    this.afterSettings(prev, "reload");
   }
 
   private watchPack(): void {
@@ -529,6 +561,40 @@ function blankSay(form: FormId, event: PetEvent): SayData {
 
 function blankAnim(form: FormId, name: PetEvent, playbackId: string): AnimData {
   return { name, form, playbackId, facing: null, loop: true, url: null };
+}
+
+export const DISK_JSON_WARNING = "磁盘上的配置不是合法 JSON。";
+
+/** same = the bytes we already have. torn = empty or cut off mid-write. apply = a complete other document. */
+export function judgeSettingsSnapshot(text: string, memoryText: string): "same" | "apply" | "torn" {
+  if (text === memoryText) return "same";
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return "torn";
+  try {
+    JSON.parse(text);
+  } catch {
+    return "torn";
+  }
+  return "apply";
+}
+
+export function nextDiskReaction(input: {
+  kind: "same" | "apply" | "torn";
+  streak: number;
+  ownWrite: boolean;
+  warning: string | null;
+}): { warning: string | null; streak: number; schedule: boolean } {
+  if (input.kind === "same") {
+    const clear = input.warning === DISK_JSON_WARNING;
+    return { warning: clear ? null : input.warning, streak: 0, schedule: false };
+  }
+  if (input.kind === "torn") {
+    if (input.ownWrite) return { warning: input.warning, streak: input.streak, schedule: true };
+    const streak = input.streak + 1;
+    if (streak < 3) return { warning: input.warning, streak, schedule: true };
+    return { warning: DISK_JSON_WARNING, streak, schedule: false };
+  }
+  return { warning: input.warning, streak: 0, schedule: false };
 }
 
 /** settings.json is UTF-8. UTF-16 (PowerShell's default) must not be decoded as text. */

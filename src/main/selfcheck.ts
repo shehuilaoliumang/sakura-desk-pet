@@ -18,7 +18,8 @@ import {
 import { resolvePack } from "./pack";
 import { parseSettings } from "../shared/schema";
 import { LLM_FALLBACK_LINE, buildChatSystemPrompt, chatWithLlm, openAiCompatibleChatUrl, type LlmFetch } from "../shared/llm";
-import { PetRuntime } from "./runtime";
+import { DISK_JSON_WARNING, judgeSettingsSnapshot, nextDiskReaction, PetRuntime } from "./runtime";
+import { POLL_ERROR, pollErrorMessage } from "../shared/pollError";
 import { startServer } from "./server";
 import type { PublicState, Settings } from "../shared/types";
 
@@ -193,6 +194,7 @@ async function main(): Promise<void> {
     await checkReasoningReply();
     await checkDuoPartnerRetry();
     await checkPortrait(base, appRoot);
+    checkSwitchFalseAlarms();
 
     console.log("sakura-pet selfcheck ok");
   } finally {
@@ -650,6 +652,43 @@ async function effortOf(settings: ReturnType<typeof defaultSettings>): Promise<u
   });
   assert(result.ok && result.text === "你好呀", "a short content line is spoken");
   return effort;
+}
+
+function checkSwitchFalseAlarms(): void {
+  const memory = `${JSON.stringify({ schemaVersion: 1 }, null, 2)}\n`;
+  assert(judgeSettingsSnapshot("", memory) === "torn", "an empty settings read is torn");
+  assert(judgeSettingsSnapshot("{\n  \"schemaVersion\": 1,", memory) === "torn", "a cut-off settings write is torn");
+  assert(judgeSettingsSnapshot(memory, memory) === "same", "the finished settings file matches memory");
+  const edited = `${JSON.stringify({ schemaVersion: 1, honorific: "老板" }, null, 2)}\n`;
+  assert(judgeSettingsSnapshot(edited, memory) === "apply", "a complete settings edit is applied");
+
+  const duringWrite = nextDiskReaction({ kind: "torn", streak: 0, ownWrite: true, warning: null });
+  assert(duringWrite.warning === null && duringWrite.streak === 0, "a form switch does not warn on its own replace");
+  const once = nextDiskReaction({ kind: "torn", streak: 0, ownWrite: false, warning: null });
+  const twice = nextDiskReaction({ kind: "torn", streak: once.streak, ownWrite: false, warning: once.warning });
+  assert(twice.warning === null, "two torn settings reads stay quiet");
+  const stuck = nextDiskReaction({ kind: "torn", streak: twice.streak, ownWrite: false, warning: twice.warning });
+  assert(stuck.warning === DISK_JSON_WARNING, "a settings file that stays unreadable is reported");
+  const restored = nextDiskReaction({ kind: "same", streak: stuck.streak, ownWrite: false, warning: stuck.warning });
+  assert(restored.warning === null && restored.streak === 0, "the finished file clears the false JSON warning");
+
+  assert(pollErrorMessage(true, 1, false) === null, "one dropped poll while the figure is up stays quiet");
+  assert(pollErrorMessage(true, 1, true) === null, "an aborted poll stays quiet");
+  assert(pollErrorMessage(true, 2, false) === POLL_ERROR, "a poll that keeps failing is shown");
+  assert(pollErrorMessage(false, 1, false) === POLL_ERROR, "boot still reports a dead API");
+
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-switch-"));
+  const runtime = new PetRuntime({ dataDir, appRoot });
+  runtime.load();
+  runtime.setForm("duo");
+  runtime.acceptDiskText("");
+  runtime.acceptDiskText("{");
+  assert(runtime.warning === null, "switching form does not surface a torn settings read");
+  assert(runtime.settings.activeForm === "duo", "the form switch survives the torn read");
+  runtime.acceptDiskText(fs.readFileSync(runtime.settingsPath, "utf8"));
+  assert(runtime.warning === null, "the written settings file leaves no warning");
+  runtime.dispose();
+  fs.rmSync(dataDir, { recursive: true, force: true });
 }
 
 async function checkPortrait(base: string, root: string): Promise<void> {

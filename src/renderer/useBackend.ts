@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isPollAbort, pollErrorMessage } from "@shared/pollError";
 import type { ConfigResponse, PublicState, ResolvedPack, Settings } from "@shared/types";
 
 export interface Backend {
@@ -35,6 +36,8 @@ export function useBackend(): Backend {
     (async () => {
       let since = -1;
       let seenRevision = -1;
+      let live = false;
+      let failures = 0;
       while (!stopped) {
         try {
           if (since < 0) {
@@ -52,6 +55,8 @@ export function useBackend(): Backend {
             setState(nextState);
             setPack(nextPack);
             setError(null);
+            live = true;
+            failures = 0;
             since = nextState.counter;
             seenRevision = nextState.sections.config.data.revision;
           }
@@ -67,6 +72,8 @@ export function useBackend(): Backend {
           since = next.counter;
           setState(next);
           setError(null);
+          live = true;
+          failures = 0;
           const revision = next.sections.config.data.revision;
           if (revision !== seenRevision) {
             seenRevision = revision;
@@ -81,10 +88,17 @@ export function useBackend(): Backend {
           }
         } catch (err) {
           if (stopped || ctrl.signal.aborted) return;
-          console.warn("[sakura-pet] backend", err);
-          setError("桌宠接口没有应答");
+          const aborted = isPollAbort(err);
+          if (!aborted) failures += 1;
+          const message = pollErrorMessage(live, failures, aborted);
+          // One dropped poll while the figure is up is the window resizing
+          // under a form switch. Keep the picture and try again quietly.
+          if (message) {
+            console.warn("[sakura-pet] backend", err);
+            setError(message);
+          }
           since = -1;
-          await sleep(1000);
+          await sleep(live ? 300 : 1000);
         }
       }
     })();

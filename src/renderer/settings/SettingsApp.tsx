@@ -130,10 +130,9 @@ export function SettingsApp() {
   const chooseForm = (id: FormId) => {
     setDraft((current) => (current ? { ...current, activeForm: id } : current));
     void postForm(id).then((result) => {
-      if (!result.ok) {
-        setSaveState("error");
-        setSaveError(result.reason === "form-disabled" ? "这个槽位还没启用" : result.reason ?? "没有切换");
-      }
+      if (result.ok || result.reason === "unreachable") return;
+      setSaveState("error");
+      setSaveError(result.reason === "form-disabled" ? "这个槽位还没启用" : result.reason ?? "没有切换");
     });
   };
 
