@@ -3,6 +3,19 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultSettings } from "../shared/defaults";
+import {
+  PORTRAIT_EMOTIONS,
+  clickTimeline,
+  hitZone,
+  idleTimeline,
+  poseSteps,
+  resolveFrame,
+  speakTouch,
+  workPose,
+  workTimeline,
+  zonesFor,
+} from "../shared/portrait";
+import { resolvePack } from "./pack";
 import { parseSettings } from "../shared/schema";
 import { LLM_FALLBACK_LINE, buildChatSystemPrompt, chatWithLlm, openAiCompatibleChatUrl, type LlmFetch } from "../shared/llm";
 import { PetRuntime } from "./runtime";
@@ -179,6 +192,7 @@ async function main(): Promise<void> {
     await checkLlm(base, user, appRoot);
     await checkReasoningReply();
     await checkDuoPartnerRetry();
+    await checkPortrait(base, appRoot);
 
     console.log("sakura-pet selfcheck ok");
   } finally {
@@ -636,6 +650,118 @@ async function effortOf(settings: ReturnType<typeof defaultSettings>): Promise<u
   });
   assert(result.ok && result.text === "你好呀", "a short content line is spoken");
   return effort;
+}
+
+async function checkPortrait(base: string, root: string): Promise<void> {
+  const pack = resolvePack(path.join(root, "packs", "sakura"));
+  const before = await stateOf(base);
+  for (const form of ["normal", "dark", "duo"] as const) {
+    const library = pack.forms[form].library;
+    assert((library.idle?.length ?? 0) >= 2, `${form} idle still has open and blink`);
+    assert((library.click?.length ?? 0) >= 1, `${form} keeps the blush click frame`);
+    assert(!library.happy, `${form} 喜 reuses click instead of a new folder`);
+    for (const name of ["angry", "sad", "joyful"] as const) {
+      assert((library[name]?.length ?? 0) >= 2, `${form} ${name} has an expression and a moved frame`);
+    }
+    const zones = zonesFor(form);
+    for (const emotion of PORTRAIT_EMOTIONS) {
+      assert(zones.some((zone) => zone.emotion === emotion), `${form} can play ${emotion}`);
+    }
+    for (const zone of zones) {
+      const hit = hitZone(form, zone.x + zone.w / 2, zone.y + zone.h / 2);
+      assert(hit?.id === zone.id, `${form} ${zone.id} center hit ${hit?.id ?? "nothing"}`);
+      const spoken = speakTouch(defaultSettings(), zone, 0);
+      assert(spoken.lines.length >= 1, `${form} ${zone.id} speaks`);
+      assert(spoken.text.includes("前辈"), `${form} ${zone.id} addresses 前辈`);
+      assert(!spoken.text.includes("黑樱") && !spoken.text.includes("常态樱") && !spoken.text.includes("她"), `${form} ${zone.id} does not name the other voice`);
+      const again = speakTouch(defaultSettings(), zone, 1);
+      const pool = zone.lines[zone.primary] ?? [];
+      if (pool.length > 1) assert(again.text !== spoken.text, `${form} ${zone.id} rotates lines`);
+    }
+    const idle = idleTimeline("idle");
+    assert(idle.repeatFrom === 0, `${form} idle loops`);
+    assert(idle.steps.some((step) => step.clip === "idle" && step.index === 1), `${form} idle blinks`);
+    assert(idle.steps.some((step) => step.y !== 0 || step.scale !== 1), `${form} idle breathes`);
+  }
+  assert((pack.forms.duo.library["sad-dark"]?.length ?? 0) >= 2, "duo can drop 黑樱's gaze on her own");
+
+  const duoZones = zonesFor("duo");
+  assert(duoZones.some((zone) => zone.primary === "dark" && zone.speakers.length === 1), "duo can address from 黑樱 alone");
+  assert(duoZones.some((zone) => zone.primary === "normal" && zone.speakers.length === 1), "duo can address from 常态樱 alone");
+  assert(duoZones.some((zone) => zone.speakers.length === 2), "duo shared zones can use both bubbles");
+  const cheek = duoZones.find((zone) => zone.id === "cheek");
+  assert(cheek?.primary === "normal" && cheek.speakers.includes("dark"), "cheek click is 常态樱's face, with 黑樱 also answering the user");
+  const hair = duoZones.find((zone) => zone.id === "dark-hair");
+  assert(hair?.primary === "dark" && hair.emotion === "angry", "duo hair click is 黑樱");
+
+  assert(hitZone("normal", 0.02, 0.02) === null, "clicks in the empty margin do nothing");
+  assert(hitZone("form4", 0.5, 0.5) === null, "reserved slots have no click zones");
+  const duoRest = hitZone("duo", 0.92, 0.94);
+  assert(duoRest?.id === "rest-normal" && duoRest.primary === "normal", "the right side of duo falls to 常态樱");
+  const duoLeft = hitZone("duo", 0.06, 0.94);
+  assert(duoLeft?.id === "rest-dark" && duoLeft.primary === "dark", "the left side of duo falls to 黑樱");
+
+  const settings = defaultSettings();
+  settings.darkMayAddressDirectly = true;
+  settings.nickname = "小前";
+  const darkFace = hitZone("dark", 0.55, 0.26);
+  assert(darkFace?.id === "face", "dark face zone");
+  const direct = speakTouch(settings, darkFace!, 0);
+  assert(direct.text.includes("小前") && !direct.text.includes("前辈"), "dark click can use the nickname");
+  settings.tabooWords = ["苹果"];
+  settings.darkMayAddressDirectly = false;
+  const apple = zonesFor("normal").find((zone) => zone.id === "apple");
+  const censored = speakTouch(settings, apple!, 0);
+  assert(censored.filtered && censored.text.includes("※") && !censored.text.includes("苹果"), "click lines still pass through taboo");
+
+  const normalLib = pack.forms.normal.library;
+  const happy = clickTimeline("click", "nod");
+  const happyUrls = happy.steps.map((step) => resolveFrame(normalLib, step));
+  assert(happyUrls.includes(normalLib.click?.[0] ?? ""), "喜 shows the existing blush frame");
+  assert(happyUrls.includes(normalLib.idle?.[1] ?? ""), "喜 also blinks");
+  assert(new Set(happyUrls).size >= 2, "喜 is more than one still");
+  assert(poseSteps("click", "nod").some((step) => step.rot !== 0), "喜 nods");
+  const angry = poseSteps("angry", "shake");
+  assert(angry.some((step) => step.clip === "angry" && step.index === 0), "怒 uses the angry face");
+  assert(angry.some((step) => step.clip === "angry" && step.index === 1), "怒 steps to the shifted frame");
+  assert(angry.some((step) => step.x !== 0), "怒 shakes");
+  assert(poseSteps("sad", "droop").some((step) => step.y > 0 && step.clip === "sad"), "哀 droops on the sad face");
+  assert(poseSteps("joyful", "bounce").some((step) => step.clip === "joyful" && (step.y < 0 || step.scale > 1)), "乐 bounces");
+  const settled = workTimeline("angry", "shake");
+  assert(settled.repeatFrom != null && settled.repeatFrom > 0, "a work emotion keeps breathing after the gesture");
+  assert(workPose("normal", "success", 70)?.emotion === "happy", "success plays 喜");
+  assert(workPose("normal", "error", 70)?.emotion === "sad", "normal error plays 哀");
+  assert(workPose("dark", "error", 70)?.emotion === "angry", "dark error plays 怒");
+  assert(workPose("duo", "error", 70)?.clip === "angry", "duo error follows 黑樱 when she has the larger share");
+  assert(workPose("duo", "error", 40)?.clip === "sad", "duo error follows 常态樱 when her share is larger");
+  assert(workPose("normal", "idle", 70) === null, "idle stays on blink and breath");
+  assert(workPose("form4", "success", 70) === null, "reserved slots do not invent a portrait");
+
+  const files = [
+    "normal/idle/01.png",
+    "normal/idle/02.png",
+    "normal/click/01.png",
+    "normal/angry/01.png",
+    "normal/sad/01.png",
+    "normal/joyful/02.png",
+    "dark/angry/01.png",
+    "dark/sad/01.png",
+    "dark/joyful/01.png",
+    "duo/angry/01.png",
+    "duo/sad/01.png",
+    "duo/sad-dark/01.png",
+    "duo/joyful/01.png",
+  ];
+  for (const file of files) {
+    const response = await fetch(`${base}/pet/media/${file}`);
+    assert(response.status === 200, `${file} is served`);
+    assert(response.headers.get("content-type")?.includes("png"), `${file} is a png`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert(bytes[0] === 0x89 && bytes[1] === 0x50, `${file} has a png header`);
+  }
+  const after = await stateOf(base);
+  assert(after.sections.workStatus.data.state === before.sections.workStatus.data.state, "reading portrait frames does not change work status");
+  assert(after.sections.config.data.activeForm === before.sections.config.data.activeForm, "reading portrait frames does not change form");
 }
 
 main().catch((error: unknown) => {

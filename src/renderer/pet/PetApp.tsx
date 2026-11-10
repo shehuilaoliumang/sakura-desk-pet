@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { bubbleStackReserve, type PetLayoutEvent } from "@shared/screenLayout";
-import { FORM_IDS, STATUS_LABEL, type FormId, type PackClip, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
+import {
+  clickTimeline,
+  hitZone,
+  idleTimeline,
+  resolveFrame,
+  speakTouch,
+  workPose,
+  workTimeline,
+  type ClickZone,
+  type PoseTimeline,
+} from "@shared/portrait";
+import { FORM_IDS, STATUS_LABEL, type FormId, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
 import { ChatPanel } from "../chat/ChatPanel";
 import { openSettings, postForm, putWindowScale, quitApp } from "../api";
 import { useBackend } from "../useBackend";
@@ -14,7 +25,9 @@ export function PetApp() {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [pressed, setPressed] = useState(false);
   const draggingRef = useRef(false);
-  const [reaction, setReaction] = useState(false);
+  const portraitRef = useRef<HTMLDivElement | null>(null);
+  const touchPick = useRef(0);
+  const [touch, setTouch] = useState<{ zone: ClickZone; pick: number; nonce: number } | null>(null);
   const [zoomHint, setZoomHint] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatTall, setChatTall] = useState(false);
@@ -31,9 +44,8 @@ export function PetApp() {
   const say = state?.pets.sakura.say.data;
   const anim = state?.pets.sakura.anim.data;
   const mood = anim?.name ?? work?.state ?? "idle";
-  const formPack = backend.pack?.forms[activeForm];
-  const poseFrames = framesFor(formPack?.clips.find((item) => item.state === mood), formPack?.clips.find((item) => item.state === "idle"));
-  const clickFrames = formPack?.click?.frames ?? [];
+  const library = backend.pack?.forms[activeForm]?.library;
+  const illustrated = (library?.idle?.length ?? 0) > 0;
 
   const openDialogue = () => {
     setMenu(null);
@@ -146,7 +158,7 @@ export function PetApp() {
   }, [settings]);
 
   useEffect(() => {
-    setReaction(false);
+    setTouch(null);
   }, [activeForm]);
 
   useEffect(() => {
@@ -246,7 +258,14 @@ export function PetApp() {
   }
 
   const displayName = settings.forms[activeForm].displayName;
-  const lines = say?.lines ?? [];
+  const touchSpeech = touch ? speakTouch(settings, touch.zone, touch.pick) : null;
+  const lines = touchSpeech?.lines ?? say?.lines ?? [];
+  const statusPose = touch ? null : workPose(activeForm, mood, settings.duoVoice.darkShare);
+  const pose = touch
+    ? clickTimeline(touch.zone.clip, touch.zone.action)
+    : statusPose
+      ? workTimeline(statusPose.clip, statusPose.action)
+      : idleTimeline(mood);
   const layoutScale = layout?.scale ?? settings.window.scale;
   const stackedDuo = activeForm === "duo" && layout?.bubbleRows === 2;
   const bubbleCount =
@@ -260,9 +279,11 @@ export function PetApp() {
     // This click dismisses the menu. Starting a drag here races restoreMenu's setBounds.
     if (menu) return;
     const cap = (event.target as HTMLElement).closest("[data-hit]") as HTMLElement | null;
+    const originX = event.clientX;
+    const originY = event.clientY;
     let moved = false;
-    const move = () => {
-      moved = true;
+    const move = (ev: PointerEvent) => {
+      if (Math.hypot(ev.clientX - originX, ev.clientY - originY) > 5) moved = true;
     };
     const end = (ev: PointerEvent) => {
       if (!draggingRef.current) return;
@@ -274,7 +295,16 @@ export function PetApp() {
       window.sakuraPet?.endDrag();
       const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
       window.sakuraPet?.setMouseIgnore(!(under && under.closest("[data-hit]")));
-      if (!moved) setReaction(true);
+      if (!moved) {
+        const rect = portraitRef.current?.getBoundingClientRect();
+        if (rect && rect.width > 8 && rect.height > 8) {
+          const zone = hitZone(activeForm, (ev.clientX - rect.left) / rect.width, (ev.clientY - rect.top) / rect.height);
+          if (zone) {
+            const pick = touchPick.current++;
+            setTouch({ zone, pick, nonce: pick });
+          }
+        }
+      }
     };
     draggingRef.current = true;
     setPressed(true);
@@ -351,15 +381,22 @@ export function PetApp() {
       </div>
 
       <div className="stage" data-hit ref={stageRef}>
-        <Figure
+        <PosePlayer
+          slotRef={portraitRef}
           form={activeForm}
           mood={mood}
           name={displayName}
           facing={anim?.facing ?? null}
-          frames={poseFrames}
-          clickFrames={clickFrames}
-          reacting={reaction}
-          onReactionEnd={() => setReaction(false)}
+          library={illustrated ? library : undefined}
+          timeline={pose}
+          onEnded={
+            touch
+              ? () => {
+                  const nonce = touch.nonce;
+                  setTouch((current) => (current && current.nonce === nonce ? null : current));
+                }
+              : undefined
+          }
         />
       </div>
 
@@ -458,72 +495,76 @@ function Bubble({ line, name }: { line?: SpeechLine; name: string }) {
   );
 }
 
-function framesFor(primary: PackClip | undefined, idle: PackClip | undefined): string[] {
-  if (primary && primary.frames.length) return primary.frames;
-  if (idle && idle.frames.length) return idle.frames;
-  return [];
-}
-
-function Figure({
+function PosePlayer({
+  slotRef,
   form,
   mood,
   name,
   facing,
-  frames,
-  clickFrames,
-  reacting,
-  onReactionEnd,
+  library,
+  timeline,
+  onEnded,
 }: {
+  slotRef: { current: HTMLDivElement | null };
   form: FormId;
   mood: PetEvent;
   name: string;
   facing: "left" | "right" | null;
-  frames: string[];
-  clickFrames: string[];
-  reacting: boolean;
-  onReactionEnd: () => void;
+  library: Record<string, string[]> | undefined;
+  timeline: PoseTimeline;
+  onEnded?: () => void;
 }) {
-  const showClick = reacting && clickFrames.length > 0;
-  const urls = showClick ? clickFrames : frames;
-  const video = urls[0] ? /\.(webm|mov)(\?|$)/i.test(urls[0]) : false;
-  return (
-    <div className={`${facing === "left" ? "mirror " : ""}mood-${mood}`}>
-      {urls.length === 0 ? (
-        <PetFigure form={form} mood={mood} name={name} />
-      ) : video ? (
-        <video key={urls[0]} src={urls[0]} autoPlay muted playsInline loop={!showClick} />
-      ) : (
-        <FrameSequence urls={urls} loop={!showClick} onEnded={showClick ? onReactionEnd : undefined} />
-      )}
-    </div>
-  );
-}
-
-function FrameSequence({ urls, loop, onEnded }: { urls: string[]; loop: boolean; onEnded?: () => void }) {
   const [index, setIndex] = useState(0);
   const ended = useRef(onEnded);
   ended.current = onEnded;
-  const signature = urls.join("|");
+  const steps = timeline.steps;
+  const stepsRef = useRef(steps);
+  stepsRef.current = steps;
+  const repeatRef = useRef(timeline.repeatFrom);
+  repeatRef.current = timeline.repeatFrom;
+  const signature = `${timeline.repeatFrom ?? "hold"}|${steps
+    .map((item) => `${item.clip}:${item.index}:${item.ms}:${item.x}:${item.y}:${item.rot}:${item.scale}`)
+    .join(";")}|${library?.idle?.[0] ?? ""}|${library?.click?.[0] ?? ""}|${library?.angry?.[0] ?? ""}|${library?.sad?.[0] ?? ""}|${library?.joyful?.[0] ?? ""}`;
 
   useEffect(() => {
     setIndex(0);
   }, [signature]);
 
   useEffect(() => {
-    if (!urls.length) return;
-    const atEnd = index >= urls.length - 1;
+    const list = stepsRef.current;
+    if (!library || !list.length) return;
+    const current = list[Math.min(index, list.length - 1)];
+    if (!current) return;
+    const atEnd = index >= list.length - 1;
     const timer = window.setTimeout(() => {
-      if (atEnd) {
-        if (loop) setIndex(0);
-        else ended.current?.();
+      if (!atEnd) {
+        setIndex((value) => value + 1);
         return;
       }
-      setIndex((current) => current + 1);
-    }, atEnd ? 180 : 340);
+      if (repeatRef.current != null) setIndex(repeatRef.current);
+      else ended.current?.();
+    }, current.ms);
     return () => window.clearTimeout(timer);
-  }, [index, loop, signature, urls.length]);
+  }, [index, library, signature]);
 
-  return <img src={urls[Math.min(index, urls.length - 1)]} alt="" draggable={false} />;
+  const pose = steps[Math.min(index, Math.max(steps.length - 1, 0))];
+  const url = pose && library ? resolveFrame(library, pose) : null;
+  const video = url ? /\.(webm|mov)(\?|$)/i.test(url) : false;
+  const transform = pose
+    ? `translate(${pose.x}%, ${pose.y}%) rotate(${pose.rot}deg) scale(${pose.scale})`
+    : undefined;
+
+  return (
+    <div className={`${facing === "left" ? "mirror " : ""}mood-${mood}`} ref={slotRef}>
+      {!url ? (
+        <PetFigure form={form} mood={mood} name={name} />
+      ) : video ? (
+        <video key={url} className="portrait-frame" src={url} autoPlay muted playsInline loop={timeline.repeatFrom != null} />
+      ) : (
+        <img className="portrait-frame" src={url} alt="" draggable={false} style={transform ? { transform } : undefined} />
+      )}
+    </div>
+  );
 }
 
 function sourceLabel(work: WorkStatusData): string {

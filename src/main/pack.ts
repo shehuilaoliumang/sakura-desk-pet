@@ -22,6 +22,7 @@ const LABEL: Record<PetEvent, string> = {
 
 const EXTS = [".webm", ".gif", ".png", ".webp", ".mov"] as const;
 const CLIP_NAMES = ["idle", "thinking", "working", "waiting", "success", "error", "click"] as const;
+const ACTION_NAME = /^[a-z0-9-]+$/;
 
 export function resolvePack(root: string): ResolvedPack {
   const manifestPath = path.join(root, "pack.json");
@@ -62,6 +63,7 @@ export function resolvePack(root: string): ResolvedPack {
             frames: hold(publicUrls(animRoot, form, clickFiles), 3),
           }
         : null,
+      library: libraryFor(animRoot, form),
     };
   }
 
@@ -82,7 +84,24 @@ function toClip(animRoot: string, form: FormId, state: PetEvent): PackClip {
   };
 }
 
-function collectFiles(animRoot: string, form: FormId, name: (typeof CLIP_NAMES)[number]): string[] {
+function libraryFor(animRoot: string, form: FormId): Record<string, string[]> {
+  const names = new Set<string>(CLIP_NAMES);
+  try {
+    for (const entry of fs.readdirSync(path.join(animRoot, form), { withFileTypes: true })) {
+      if (entry.isDirectory() && ACTION_NAME.test(entry.name)) names.add(entry.name);
+    }
+  } catch {
+    // form folder missing
+  }
+  const library: Record<string, string[]> = {};
+  for (const name of names) {
+    const urls = publicUrls(animRoot, form, collectFiles(animRoot, form, name));
+    if (urls.length) library[name] = urls;
+  }
+  return library;
+}
+
+function collectFiles(animRoot: string, form: FormId, name: string): string[] {
   const dir = path.join(animRoot, form, name);
   try {
     if (fs.statSync(dir).isDirectory()) {

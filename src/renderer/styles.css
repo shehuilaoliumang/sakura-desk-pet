@@ -725,8 +725,11 @@ body[data-window="chat"] .chat-dock { height: 100%; border-radius: 0; }
   50% { opacity: 1; }
 }
 
+.portrait-frame { transform-origin: 50% 72%; }
+
 @media (prefers-reduced-motion: reduce) {
   .figure, .hair, .ribbon, .eye-open, .lamp.working { animation: none !important; }
+  .portrait-frame { transform: none !important; }
 }
 
 @media (max-width: 980px) {

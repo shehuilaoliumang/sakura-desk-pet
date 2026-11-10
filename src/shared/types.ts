@@ -218,7 +218,12 @@ export interface ResolvedPack {
   credit: string;
   root: string;
   warning: string | null;
-  forms: Record<FormId, { clips: PackClip[]; click: ClickClip | null }>;
+  forms: Record<FormId, {
+    clips: PackClip[];
+    click: ClickClip | null;
+    /** Action folder → frame urls in filename order. `idle` is the raw open/blink pair, not the paced loop. */
+    library: Record<string, string[]>;
+  }>;
 }
 
 export interface ConfigResponse {
