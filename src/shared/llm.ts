@@ -1,5 +1,5 @@
 import { effectivePersonas } from "./persona";
-import type { FormId, Settings } from "./types";
+import type { FormId, ReasoningEffort, Settings } from "./types";
 
 /**
  * Pluggable chat providers.
@@ -15,6 +15,8 @@ import type { FormId, Settings } from "./types";
  * spoken line is always `LLM_FALLBACK_LINE`. The pet keeps its work status.
  * Thinking models may put the chain in `reasoning_content` and leave `content`
  * empty. The bubble uses only the final visible content, never that chain.
+ * Local and Qwen chats send `reasoning_effort: "none"` unless the setting says
+ * otherwise, so a short spoken line does not wait out a long chain.
  * 「测试连接」does not require the enable switch and does not change the bubble.
  */
 
@@ -77,6 +79,7 @@ export interface LlmCompleteInput {
   maxTokens: number;
   temperature: number;
   timeoutMs: number;
+  reasoningEffort: ReasoningEffort;
   fetchImpl: LlmFetch;
 }
 
@@ -214,9 +217,10 @@ interface ReadyCall {
   apiKey: string;
   model: string;
   timeoutMs: number;
+  reasoningEffort: ReasoningEffort;
 }
 
-function prepare(settings: Settings, mode: "chat" | "test"): { ok: true; provider: LlmProvider; baseUrl: string; apiKey: string; model: string; timeoutMs: number } | { ok: false; result: LlmCallResult } {
+function prepare(settings: Settings, mode: "chat" | "test"): { ok: true; provider: LlmProvider; baseUrl: string; apiKey: string; model: string; timeoutMs: number; reasoningEffort: ReasoningEffort } | { ok: false; result: LlmCallResult } {
   if (mode === "chat" && !settings.llm.enabled) return { ok: false, result: fallback("disabled", "智能对话没有打开") };
   const provider = findLlmProvider(settings.llm.provider);
   if (!provider) return { ok: false, result: fallback("unknown-provider", "不认识这个提供方") };
@@ -243,6 +247,7 @@ function prepare(settings: Settings, mode: "chat" | "test"): { ok: true; provide
     apiKey,
     model: settings.llm.model.trim() || provider.defaultModel,
     timeoutMs: settings.llm.timeoutMs,
+    reasoningEffort: settings.llm.reasoningEffort,
   };
 }
 
@@ -263,6 +268,7 @@ async function run(
       maxTokens,
       temperature,
       timeoutMs: ready.timeoutMs,
+      reasoningEffort: ready.reasoningEffort,
       fetchImpl,
     });
     if (!completed.ok) return { ok: false, text: LLM_FALLBACK_LINE, source: "fallback", reason: completed.reason, detail: redact(completed.detail, ready.apiKey) };
@@ -289,6 +295,39 @@ async function completeOpenAiCompatible(input: LlmCompleteInput): Promise<LlmCom
   return first.result;
 }
 
+function completionBody(input: LlmCompleteInput, maxTokens: number): string {
+  const payload: Record<string, unknown> = {
+    model: input.model,
+    messages: input.messages,
+    temperature: input.temperature,
+    max_tokens: maxTokens,
+  };
+  const effort = outboundReasoningEffort(input.reasoningEffort, input.baseUrl, input.model);
+  if (effort) payload.reasoning_effort = effort;
+  return JSON.stringify(payload);
+}
+
+/**
+ * LM Studio's Qwen returns a short `content` when the request asks for
+ * `reasoning_effort: "none"`. Cloud models that reject the field stay on auto,
+ * which omits it unless the host is loopback or the model id is Qwen.
+ */
+function outboundReasoningEffort(effort: ReasoningEffort, baseUrl: string, model: string): "none" | null {
+  if (effort === "off") return null;
+  if (effort === "none") return "none";
+  if (isLoopback(baseUrl) || /qwen/i.test(model)) return "none";
+  return null;
+}
+
+function isLoopback(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
 async function requestCompletion(
   input: LlmCompleteInput,
   maxTokens: number,
@@ -303,12 +342,7 @@ async function requestCompletion(
         "content-type": "application/json",
         authorization: `Bearer ${input.apiKey}`,
       },
-      body: JSON.stringify({
-        model: input.model,
-        messages: input.messages,
-        temperature: input.temperature,
-        max_tokens: maxTokens,
-      }),
+      body: completionBody(input, maxTokens),
       signal: controller.signal,
       redirect: "error",
     });

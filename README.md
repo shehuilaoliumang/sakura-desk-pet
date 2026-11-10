@@ -79,7 +79,7 @@ SAKURA_PET_NO_SANDBOX=1 npm start
 2. 提供方选「OpenAI 兼容」。以后要加别的提供方，只要在 `src/shared/llm.ts` 的注册表里补一个 `complete`，调用路径不用改。
 3. **接口地址**填服务的 Base URL，例如 `https://api.openai.com/v1`、`https://api.deepseek.com`、`https://openrouter.ai/api/v1`，或本机 Ollama 的 `http://127.0.0.1:11434/v1`。末尾已是 `/v1` 就补 `/chat/completions`；已经写到 `/chat/completions` 就原样用；否则补 `/v1/chat/completions`。
 4. **密钥**填 API Key。它只写进本机 `settings.json`（和别的设置同一个文件），不要提交，也不要写进仓库。程序不会在日志里打出密钥。本地服务如果并不校验密钥，可以填一个占位。
-5. **模型**可留空，留空时按 OpenAI 兼容的默认 `gpt-4o-mini`。DeepSeek 填 `deepseek-chat`，Ollama 填本机模型名。本机 LM Studio 的 Qwen 一类思考模型也走这套接口：最终一句在 `message.content`，思考在 `reasoning_content`。气泡只用最终一句；如果这一轮只回了思考，会再要一次更大的篇幅，仍没有最终一句就说「……这会儿说不了。」，不会把思考过程贴上去。对话的篇幅比连接测试大，慢的本机模型可以把「超时（毫秒）」调到最多 120000。
+5. **模型**可留空，留空时按 OpenAI 兼容的默认 `gpt-4o-mini`。DeepSeek 填 `deepseek-chat`，Ollama 填本机模型名。本机 LM Studio 的 Qwen 一类思考模型也走这套接口。**思考**默认是「自动」：本机地址或模型名里有 Qwen 时，请求带 `reasoning_effort: "none"`，模型直接回短句，不再把思考写进 `reasoning_content`。也可以改成「直接说短句」（始终带上）或「允许思考」（不带这项，给不认识它的云端接口）。就算仍只回了思考，气泡也只用最终 `content`；没有最终一句就说「……这会儿说不了。」，不会把思考过程贴上去。慢的本机模型可以把「超时（毫秒）」调到最多 120000。
 6. 「测试连接」发一个很小的请求，在设置页用中文显示结果。它不要求先打开开关，也不改桌宠气泡。
 7. 桌宠默认只有立绘和气泡。右键「对话」或按 L，在立绘旁边弹出一块够打字的对话面板（左右看屏幕空位，不盖住立绘）。说完、按 Esc 或点关闭就收起。设置里的「试对话」做同样的请求。托盘「试对话」只发送「在吗」，不打开面板。
 

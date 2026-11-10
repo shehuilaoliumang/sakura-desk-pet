@@ -17,6 +17,14 @@ export function isThemeId(value: string): value is ThemeId {
   return (THEME_IDS as readonly string[]).includes(value);
 }
 
+/** auto = none on loopback or Qwen; none = always send; off = omit the field. */
+export const REASONING_EFFORTS = ["auto", "none", "off"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+export function isReasoningEffort(value: string): value is ReasoningEffort {
+  return (REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
 export interface LlmSettings {
   enabled: boolean;
   provider: string;
@@ -24,6 +32,7 @@ export interface LlmSettings {
   apiKey: string;
   model: string;
   timeoutMs: number;
+  reasoningEffort: ReasoningEffort;
 }
 
 export type Speaker = "normal" | "dark";

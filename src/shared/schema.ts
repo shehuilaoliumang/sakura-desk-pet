@@ -4,8 +4,10 @@ import {
   DEFAULT_LLM_PROVIDER,
   FORM_IDS,
   FORM_SLOT,
+  REASONING_EFFORTS,
   THEME_IDS,
   isFormId,
+  isReasoningEffort,
   isThemeId,
   type FormId,
   type Settings,
@@ -71,6 +73,7 @@ export const settingsSchema = z.object({
     apiKey: z.string(),
     model: z.string(),
     timeoutMs: z.number(),
+    reasoningEffort: z.enum(REASONING_EFFORTS),
   }),
   theme: z.enum(THEME_IDS),
 });
@@ -102,6 +105,7 @@ export function normalizeSettings(input: Settings): Settings {
   s.llm.apiKey = s.llm.apiKey.replace(/[\u0000\r\n]/g, "").trim().slice(0, 2000);
   s.llm.model = s.llm.model.trim().slice(0, 128);
   s.llm.timeoutMs = Math.round(clamp(s.llm.timeoutMs, 500, 120_000));
+  if (!isReasoningEffort(s.llm.reasoningEffort)) s.llm.reasoningEffort = "auto";
   if (!isThemeId(s.theme)) s.theme = "warm";
 
   for (const id of FORM_IDS) {
@@ -168,6 +172,9 @@ export function mergeSettings(base: Settings, input: unknown): Settings {
     if (typeof src.llm.apiKey === "string") next.llm.apiKey = src.llm.apiKey;
     if (typeof src.llm.model === "string") next.llm.model = src.llm.model;
     if (typeof src.llm.timeoutMs === "number") next.llm.timeoutMs = src.llm.timeoutMs;
+    if (typeof src.llm.reasoningEffort === "string" && isReasoningEffort(src.llm.reasoningEffort)) {
+      next.llm.reasoningEffort = src.llm.reasoningEffort;
+    }
   }
   if (typeof src.theme === "string" && isThemeId(src.theme)) next.theme = src.theme;
   if (isRecord(src.forms)) {

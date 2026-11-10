@@ -84,6 +84,7 @@ export function defaultSettings(): Settings {
       apiKey: "",
       model: "",
       timeoutMs: 20_000,
+      reasoningEffort: "auto",
     },
     theme: "warm",
   };

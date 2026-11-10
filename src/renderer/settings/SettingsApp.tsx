@@ -333,6 +333,25 @@ export function SettingsApp() {
             />
           </label>
           <label className="field">
+            <span>思考</span>
+            <select
+              value={draft.llm.reasoningEffort}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value !== "auto" && value !== "none" && value !== "off") return;
+                edit((current) => ({ ...current, llm: { ...current.llm, reasoningEffort: value } }));
+              }}
+            >
+              <option value="auto">自动（本机或 Qwen 直接说短句）</option>
+              <option value="none">直接说短句</option>
+              <option value="off">允许思考</option>
+            </select>
+          </label>
+          <p className="hint">
+            「直接说短句」会在请求里加上 reasoning_effort: none。LM Studio 的 Qwen 会少写思考、马上回一句。
+            云端接口若不认识这项，选「允许思考」。
+          </p>
+          <label className="field">
             <span>超时（毫秒）</span>
             <input
               type="number"

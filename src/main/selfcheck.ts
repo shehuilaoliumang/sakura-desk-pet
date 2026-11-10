@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultSettings } from "../shared/defaults";
+import { parseSettings } from "../shared/schema";
 import { LLM_FALLBACK_LINE, buildChatSystemPrompt, chatWithLlm, openAiCompatibleChatUrl, type LlmFetch } from "../shared/llm";
 import { PetRuntime } from "./runtime";
 import { startServer } from "./server";
@@ -242,6 +243,7 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   let sawPrompt = false;
   let mode: "ok" | "http" | "taboo" | "vision" = "ok";
   let sawImage = false;
+  let sawReasoningEffort: unknown;
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) return realFetch(input, init);
@@ -261,8 +263,9 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
         headers: { "content-type": "application/json" },
       });
     }
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) as { model?: string; messages?: { role: string; content: unknown }[] } : {};
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) as { model?: string; messages?: { role: string; content: unknown }[]; reasoning_effort?: unknown } : {};
     sawModel = body.model === "gpt-4o-mini";
+    sawReasoningEffort = body.reasoning_effort;
     const systemRaw = body.messages?.find((item) => item.role === "system")?.content;
     const system = typeof systemRaw === "string" ? systemRaw : "";
     if (system) sawPrompt = system.includes("老板") && system.includes("黑樱");
@@ -335,6 +338,7 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
     assert(lastUrl === "https://llm.invalid/v1/chat/completions", "chat posts to chat completions");
     assert(sawBearer, "chat sends the bearer token");
     assert(externalCalls === callsBeforeStatus + 1, "chat makes one provider call");
+    assert(sawReasoningEffort === undefined, "a cloud model does not get reasoning_effort");
     state = await stateOf(base);
     assert(state.pets.sakura.say.data.text === "在的，老板。", "pet shows the assistant line");
     assert(state.pets.sakura.say.data.origin === "broadcast", "chat line is not a status template");
@@ -438,6 +442,7 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   assert((warmed.json.settings as Settings).theme === "warm", "warm theme can be restored");
   assert(partial.settings.llm.provider === "openai-compatible", "old settings file gets the default provider");
   assert(partial.settings.llm.apiKey === "", "old settings file does not invent a key");
+  assert(partial.settings.llm.reasoningEffort === "auto", "old settings file skips reasoning by default");
   assert(partial.settings.honorific === "前辈", "old settings file keeps the honorific");
   partial.dispose();
   fs.rmSync(partialDir, { recursive: true, force: true });
@@ -452,10 +457,12 @@ async function checkReasoningReply(): Promise<void> {
   const thinking = "先在心里想了很久，这段不该出现在气泡里。";
 
   const budgets: number[] = [];
+  const efforts: unknown[] = [];
   let round = 0;
   const retrying: LlmFetch = async (_url, init) => {
-    const body = JSON.parse(init.body) as { max_tokens?: number };
+    const body = JSON.parse(init.body) as { max_tokens?: number; reasoning_effort?: unknown };
     budgets.push(body.max_tokens ?? 0);
+    efforts.push(body.reasoning_effort);
     round += 1;
     const message = round === 1
       ? { content: "", reasoning_content: thinking }
@@ -464,6 +471,7 @@ async function checkReasoningReply(): Promise<void> {
   };
   const spoken = await chatWithLlm(settings, "在吗", retrying);
   assert(budgets[0] === 2048 && budgets[1] === 4096, "a thinking reply gets one larger retry");
+  assert(efforts[0] === "none" && efforts[1] === "none", "local Qwen asks the model not to think");
   assert(spoken.ok && spoken.text === "在的，前辈。", "the bubble uses the final content");
   assert(!spoken.text.includes("不该出现"), "reasoning is not spoken");
 
@@ -494,6 +502,35 @@ async function checkReasoningReply(): Promise<void> {
   assert(stuck === 2 && !quiet.ok && quiet.text === LLM_FALLBACK_LINE, "reasoning without a line stays on the short fallback");
   assert(!quiet.detail.includes("不该出现"), "the failure detail does not paste the thinking");
   assert(quiet.detail.includes("思考"), "the failure says the model only thought");
+
+  settings.llm.reasoningEffort = "none";
+  settings.llm.baseUrl = "https://api.openai.com/v1";
+  settings.llm.model = "gpt-4o-mini";
+  assert(await effortOf(settings) === "none", "直接说短句 always sends reasoning_effort none");
+  settings.llm.reasoningEffort = "off";
+  assert(await effortOf(settings) === undefined, "允许思考 omits reasoning_effort");
+  settings.llm.reasoningEffort = "auto";
+  assert(await effortOf(settings) === undefined, "auto leaves cloud models alone");
+  settings.llm.model = "qwen3.5-9b";
+  assert(await effortOf(settings) === "none", "auto still skips thinking for Qwen");
+  settings.llm.baseUrl = "http://localhost:11434/v1";
+  settings.llm.model = "llama";
+  assert(await effortOf(settings) === "none", "auto skips thinking on loopback");
+
+  const kept = parseSettings({ llm: { reasoningEffort: "none" } });
+  assert(kept.ok && kept.settings.llm.reasoningEffort === "none", "reasoning effort persists");
+  const ignored = parseSettings({ llm: { reasoningEffort: "high" } });
+  assert(ignored.ok && ignored.settings.llm.reasoningEffort === "auto", "unknown reasoning effort stays auto");
+}
+
+async function effortOf(settings: ReturnType<typeof defaultSettings>): Promise<unknown> {
+  let effort: unknown = "missing";
+  const result = await chatWithLlm(settings, "在吗", async (_url, init) => {
+    effort = (JSON.parse(init.body) as { reasoning_effort?: unknown }).reasoning_effort;
+    return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "你好呀" } }] }) };
+  });
+  assert(result.ok && result.text === "你好呀", "a short content line is spoken");
+  return effort;
 }
 
 main().catch((error: unknown) => {
