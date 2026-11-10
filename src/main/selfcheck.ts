@@ -235,6 +235,10 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   assert(prompt.includes("老板"), "chat prompt keeps the honorific");
   assert(prompt.includes("黑樱"), "chat prompt keeps the active form");
   assert(prompt.includes("||"), "duo chat asks both voices for a line");
+  assert(prompt.includes("都是对用户说的"), "duo lines both address the user");
+  assert(prompt.includes("称呼用户为「老板」"), "both lines use the configured honorific");
+  assert(prompt.includes("不要互相接话") && prompt.includes("不要互相点评"), "duo lines must not talk to each other");
+  assert(!prompt.includes("一句附和"), "duo prompt does not ask for an echo");
 
   const realFetch = globalThis.fetch;
   let externalCalls = 0;
@@ -445,6 +449,7 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
     assert(pairedLines[0]?.speaker === "dark" && pairedLines[0]?.text === "别怕。", "dark bubble is the first line");
     assert(pairedLines[1]?.speaker === "normal" && pairedLines[1]?.text === "……嗯。", "normal bubble is the second line");
     assert(lastSystem.includes("||"), "the live duo prompt asks for both lines");
+    assert(lastSystem.includes("都是对用户说的") && lastSystem.includes("不要互相接话"), "the live duo prompt keeps both lines aimed at the user");
     assert(state.pets.sakura.say.data.origin === "broadcast", "duo chat is not a status template");
 
     mode = "duo-nl";

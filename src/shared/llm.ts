@@ -126,18 +126,24 @@ export function buildChatSystemPrompt(settings: Settings): string {
   const honorific = personas.honorific || "你";
   const nickname = personas.nickname.trim();
   const direct = settings.darkMayAddressDirectly && (form === "dark" || form === "duo");
-  const address = direct
-    ? `可以直呼「${nickname || "你"}」，不必用「${honorific}」。`
-    : `称呼对方为「${honorific}」。`;
   const duoLines = form === "duo" && settings.duoVoice.dualBubble;
+  const address = duoLines
+    ? [
+      direct ? `黑樱可以直呼用户为「${nickname || "你"}」。` : `黑樱称呼用户为「${honorific}」。`,
+      `常态樱称呼用户为「${honorific}」。`,
+      "两句都是对用户说的。不要把称谓用在彼此身上，不要互相接话，不要互相点评，不要互相称呼。",
+    ].join("")
+    : direct
+      ? `可以直呼用户为「${nickname || "你"}」，不必用「${honorific}」。`
+      : `称呼用户为「${honorific}」。`;
   return [
     persona,
     `当前形态：${formLabel(settings)}。`,
     address,
     toneHint(settings, form),
     duoLines
-      ? "说两句，中间只用 || 隔开。|| 前面是黑樱的一句，后面是常态樱的一句。不要第三句，不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。"
-      : "只说一句能放进气泡的中文口语。不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。",
+      ? "说两句，中间只用 || 隔开。|| 前面只是黑樱对用户说的一句，后面只是常态樱对用户说的一句。两句各说各的，不接对方的话，不提对方的名字，不评价对方的表情或动作。不要第三句，不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。"
+      : "只说一句能放进气泡的中文口语，这句话是对用户说的。不要标题，不要分点，不要用引号把整句包起来，不要说自己是语言模型。",
   ].join("\n");
 }
 
@@ -178,7 +184,7 @@ export async function chatWithLlm(
   const duoLines = settings.activeForm === "duo" && settings.duoVoice.dualBubble;
   const seen = picture.image
     ? duoLines
-      ? "\n对方发来一张图。黑樱和常态樱各用一句说说看到的，仍用 || 隔开。"
+      ? "\n对方发来一张图。黑樱和常态樱各用一句告诉用户自己看到了什么，仍用 || 隔开。两句都对用户说，不要互相接话。"
       : "\n对方发来一张图。用一句中文口语说说你看到的。"
     : "";
   const messages: LlmMessage[] = [
@@ -207,8 +213,8 @@ export async function testLlmConnection(settings: Settings, fetchImpl?: LlmFetch
 function formLabel(settings: Settings): string {
   const form = settings.activeForm;
   if (form === "dark") return "黑樱";
-  if (form === "duo" && settings.duoVoice.dualBubble) return "双人同框。黑樱和常态樱都在，两人各说一句";
-  if (form === "duo") return settings.duoVoice.darkShare < 50 ? "双人同框。这一句由常态樱说" : "双人同框。这一句由黑樱说";
+  if (form === "duo" && settings.duoVoice.dualBubble) return "双人同框。黑樱和常态樱都在场，这一轮两人都只回答用户，不是两人对话";
+  if (form === "duo") return settings.duoVoice.darkShare < 50 ? "双人同框。这一句由常态樱对用户说" : "双人同框。这一句由黑樱对用户说";
   if (form === "normal") return "常态樱";
   return "预留形态";
 }
