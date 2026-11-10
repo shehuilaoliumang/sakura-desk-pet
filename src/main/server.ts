@@ -77,7 +77,7 @@ async function handle(runtime: PetRuntime, req: http.IncomingMessage, res: http.
     send(res, 200, {
       ok: true,
       petId: PET_ID,
-      routes: ["state", "config", "config/meta", "anim", "broadcast", "bubble/clear", "work-status", "events", "form", "pack", "playback/{id}", "media/{form}/{file}"],
+      routes: ["state", "config", "config/meta", "anim", "broadcast", "bubble/clear", "work-status", "events", "form", "pack", "llm/chat", "llm/test", "playback/{id}", "media/{form}/{file}"],
     });
     return;
   }
@@ -231,6 +231,41 @@ async function handle(runtime: PetRuntime, req: http.IncomingMessage, res: http.
     return;
   }
 
+  if (req.method === "POST" && stripped === "/llm/test") {
+    if (!isUser(req)) throw new HttpError(403, "user-only");
+    await readJson(req);
+    const result = await runtime.testLlm();
+    log(req.method, url.pathname, `source=${result.source} reason=${result.reason ?? "ok"}`);
+    send(res, 200, {
+      ok: result.ok,
+      source: result.source,
+      text: result.text,
+      detail: result.detail,
+      reason: result.reason,
+    });
+    return;
+  }
+
+  if (req.method === "POST" && stripped === "/llm/chat") {
+    if (!isUser(req)) throw new HttpError(403, "user-only");
+    const body = await readJson(req, 4_000_000);
+    if (!isRecord(body) || typeof body.message !== "string") throw new HttpError(400, "empty-text");
+    const image = typeof body.image === "string" ? body.image : undefined;
+    if (!body.message.trim() && !image) throw new HttpError(400, "empty-text");
+    const result = await runtime.speakWithLlm(body.message, image);
+    log(req.method, url.pathname, `source=${result.source} reason=${result.reason ?? "ok"} form=${runtime.settings.activeForm}`);
+    send(res, 200, {
+      ok: result.ok,
+      source: result.source,
+      text: result.text,
+      detail: result.detail,
+      reason: result.reason,
+      filtered: result.filtered,
+      activeForm: runtime.settings.activeForm,
+    });
+    return;
+  }
+
   if (req.method === "GET" && stripped === "/pack") {
     send(res, 200, runtime.getPack());
     return;
@@ -342,7 +377,7 @@ function mediaUrlAllowed(url: string, port: number): boolean {
   }
 }
 
-function readJson(req: http.IncomingMessage): Promise<unknown> {
+function readJson(req: http.IncomingMessage, maxBytes = 65_536): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -367,7 +402,7 @@ function readJson(req: http.IncomingMessage): Promise<unknown> {
     };
     const onData = (chunk: Buffer) => {
       size += chunk.length;
-      if (size > 65_536) {
+      if (size > maxBytes) {
         finish(new HttpError(413, "too-large"));
         req.destroy();
         return;

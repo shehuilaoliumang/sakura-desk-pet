@@ -7,6 +7,34 @@ export type PetEvent = (typeof PET_EVENTS)[number];
 export const ADAPTER_IDS = ["dsh", "codex", "webhook"] as const;
 export type AdapterId = (typeof ADAPTER_IDS)[number];
 
+/** Known ids live in the provider registry. Stored as a string so a new provider does not need a settings migration. */
+export const DEFAULT_LLM_PROVIDER = "openai-compatible";
+
+export const THEME_IDS = ["warm", "glass"] as const;
+export type ThemeId = (typeof THEME_IDS)[number];
+
+export function isThemeId(value: string): value is ThemeId {
+  return (THEME_IDS as readonly string[]).includes(value);
+}
+
+/** auto = none on loopback or Qwen; none = always send; off = omit the field. */
+export const REASONING_EFFORTS = ["auto", "none", "off"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+export function isReasoningEffort(value: string): value is ReasoningEffort {
+  return (REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
+export interface LlmSettings {
+  enabled: boolean;
+  provider: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  timeoutMs: number;
+  reasoningEffort: ReasoningEffort;
+}
+
 export type Speaker = "normal" | "dark";
 
 export function isFormId(value: string): value is FormId {
@@ -89,6 +117,9 @@ export interface Settings {
     scale: number;
     alwaysOnTop: boolean;
   };
+  llm: LlmSettings;
+  /** warm = 经典暖色, glass = 浅色毛玻璃 */
+  theme: ThemeId;
 }
 
 export interface SpeechLine {

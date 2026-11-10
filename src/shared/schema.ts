@@ -1,9 +1,14 @@
 import { z } from "zod";
 import { defaultSettings } from "./defaults";
 import {
+  DEFAULT_LLM_PROVIDER,
   FORM_IDS,
   FORM_SLOT,
+  REASONING_EFFORTS,
+  THEME_IDS,
   isFormId,
+  isReasoningEffort,
+  isThemeId,
   type FormId,
   type Settings,
 } from "./types";
@@ -61,6 +66,16 @@ export const settingsSchema = z.object({
     scale: z.number(),
     alwaysOnTop: z.boolean(),
   }),
+  llm: z.object({
+    enabled: z.boolean(),
+    provider: z.string(),
+    baseUrl: z.string(),
+    apiKey: z.string(),
+    model: z.string(),
+    timeoutMs: z.number(),
+    reasoningEffort: z.enum(REASONING_EFFORTS),
+  }),
+  theme: z.enum(THEME_IDS),
 });
 
 function clamp(n: number, min: number, max: number): number {
@@ -84,6 +99,14 @@ export function normalizeSettings(input: Settings): Settings {
   s.window.scale = Math.round(clamp(s.window.scale, 0.4, 2) * 100) / 100;
   if (s.window.x != null && !Number.isFinite(s.window.x)) s.window.x = null;
   if (s.window.y != null && !Number.isFinite(s.window.y)) s.window.y = null;
+  const provider = s.llm.provider.trim().slice(0, 64);
+  s.llm.provider = provider || DEFAULT_LLM_PROVIDER;
+  s.llm.baseUrl = s.llm.baseUrl.trim().slice(0, 500);
+  s.llm.apiKey = s.llm.apiKey.replace(/[\u0000\r\n]/g, "").trim().slice(0, 2000);
+  s.llm.model = s.llm.model.trim().slice(0, 128);
+  s.llm.timeoutMs = Math.round(clamp(s.llm.timeoutMs, 500, 120_000));
+  if (!isReasoningEffort(s.llm.reasoningEffort)) s.llm.reasoningEffort = "auto";
+  if (!isThemeId(s.theme)) s.theme = "warm";
 
   for (const id of FORM_IDS) {
     const slot = s.forms[id];
@@ -142,6 +165,18 @@ export function mergeSettings(base: Settings, input: unknown): Settings {
     if (typeof src.window.x === "number") next.window.x = src.window.x;
     if (typeof src.window.y === "number") next.window.y = src.window.y;
   }
+  if (isRecord(src.llm)) {
+    if (typeof src.llm.enabled === "boolean") next.llm.enabled = src.llm.enabled;
+    if (typeof src.llm.provider === "string") next.llm.provider = src.llm.provider;
+    if (typeof src.llm.baseUrl === "string") next.llm.baseUrl = src.llm.baseUrl;
+    if (typeof src.llm.apiKey === "string") next.llm.apiKey = src.llm.apiKey;
+    if (typeof src.llm.model === "string") next.llm.model = src.llm.model;
+    if (typeof src.llm.timeoutMs === "number") next.llm.timeoutMs = src.llm.timeoutMs;
+    if (typeof src.llm.reasoningEffort === "string" && isReasoningEffort(src.llm.reasoningEffort)) {
+      next.llm.reasoningEffort = src.llm.reasoningEffort;
+    }
+  }
+  if (typeof src.theme === "string" && isThemeId(src.theme)) next.theme = src.theme;
   if (isRecord(src.forms)) {
     for (const id of FORM_IDS) {
       const patch = src.forms[id];

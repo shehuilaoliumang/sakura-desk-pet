@@ -24,6 +24,11 @@ let runtime: PetRuntime | null = null;
 let server: http.Server | null = null;
 let petWin: BrowserWindow | null = null;
 let settingsWin: BrowserWindow | null = null;
+let chatWin: BrowserWindow | null = null;
+let chatPreview = false;
+const CHAT_W = 420;
+const CHAT_H = 300;
+const CHAT_PREVIEW_H = 420;
 let tray: Tray | null = null;
 /** While the context menu is open, window is expanded; content origin stays fixed on screen. */
 let menuChrome: { x: number; y: number; width: number; height: number } | null = null;
@@ -66,6 +71,11 @@ async function boot(): Promise<void> {
 
   logDisplays();
   createPetWindow();
+  try {
+    ensureTray();
+  } catch (error) {
+    console.warn("[sakura-pet] tray unavailable", error instanceof Error ? error.name : "error");
+  }
   runtime.on("change", (reason: ChangeReason) => {
     if (reason === "settings" || reason === "reload" || reason === "form") applyChrome(reason === "reload");
   });
@@ -141,6 +151,7 @@ function createPetWindow(): void {
 function openSettings(): void {
   if (!runtime) return;
   if (settingsWin) {
+    paintSettingsChrome();
     settingsWin.show();
     settingsWin.focus();
     return;
@@ -153,7 +164,7 @@ function openSettings(): void {
     minHeight: 560,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: "#f3eee6",
+    backgroundColor: settingsChromeColor(),
     title: "樱 · 设置",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -245,6 +256,7 @@ function applyFit(rect: Rect, fitted: PetFit): void {
     );
   }
   pushLayout();
+  if (chatWin && !chatWin.isDestroyed() && chatWin.isVisible()) placeChatWindow();
 }
 
 function refitPet(): void {
@@ -288,7 +300,94 @@ function placePet(force: boolean): void {
   );
 }
 
+function settingsChromeColor(): string {
+  return runtime?.settings.theme === "glass" ? "#e8eef5" : "#f3eee6";
+}
+
+function paintSettingsChrome(): void {
+  const color = settingsChromeColor();
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.setBackgroundColor(color);
+  if (chatWin && !chatWin.isDestroyed()) chatWin.setBackgroundColor(color);
+}
+
+function placeChatWindow(): void {
+  if (!chatWin || chatWin.isDestroyed() || !petWin || petWin.isDestroyed() || !runtime) return;
+  const live = petWin.getBounds();
+  const area = displayUnderPoint(workAreas(), live.x + live.width / 2, live.y + live.height / 2)
+    ?? screen.getPrimaryDisplay().workArea;
+  const layout = layoutContextMenu({
+    winOrigin: live,
+    figure: live,
+    workArea: area,
+    menuW: CHAT_W,
+    menuH: chatPreview ? Math.min(CHAT_PREVIEW_H, area.height - 16) : CHAT_H,
+  });
+  const width = Math.max(1, layout.menuW);
+  const height = Math.max(1, layout.menuH);
+  chatWin.setMinimumSize(Math.min(280, width), Math.min(200, height));
+  chatWin.setBounds({
+    x: Math.round(layout.bounds.x + layout.menu.x),
+    y: Math.round(layout.bounds.y + layout.menu.y),
+    width,
+    height,
+  });
+}
+
+function openChatWindow(): void {
+  if (!runtime) return;
+  if (chatWin && !chatWin.isDestroyed()) {
+    if (chatWin.isVisible()) {
+      closeChatWindow();
+      return;
+    }
+    placeChatWindow();
+    paintSettingsChrome();
+    chatWin.show();
+    chatWin.focus();
+    return;
+  }
+  chatPreview = false;
+  chatWin = new BrowserWindow({
+    width: CHAT_W,
+    height: CHAT_H,
+    show: false,
+    frame: false,
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    autoHideMenuBar: true,
+    backgroundColor: settingsChromeColor(),
+    title: "樱 · 对话",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  chatWin.setMenuBarVisibility(false);
+  const dev = rendererUrl("/chat");
+  if (dev) void chatWin.loadURL(dev);
+  else void chatWin.loadFile(path.join(appRoot(), "dist", "index.html"), { hash: "/chat" });
+  chatWin.once("ready-to-show", () => {
+    placeChatWindow();
+    chatWin?.show();
+    chatWin?.focus();
+  });
+  chatWin.on("closed", () => {
+    chatWin = null;
+  });
+}
+
+function closeChatWindow(): void {
+  if (!chatWin || chatWin.isDestroyed()) return;
+  chatWin.close();
+}
+
 function applyChrome(place: boolean): void {
+  paintSettingsChrome();
   if (!runtime || !petWin || dragSession) return;
   if (menuChrome && currentFit) {
     menuChrome = { x: menuChrome.x, y: menuChrome.y, width: currentFit.width, height: currentFit.height };
@@ -315,6 +414,7 @@ function ensureTray(): void {
     Menu.buildFromTemplate([
       { label: "显示桌宠", click: () => { petWin?.show(); petWin?.focus(); } },
       { label: "设置", click: () => openSettings() },
+      { label: "试对话", click: () => { void runtime?.speakWithLlm("在吗"); } },
       { type: "separator" },
       { label: "退出", click: () => app.quit() },
     ]),
@@ -443,6 +543,13 @@ function wireIpc(): void {
     finishDrag();
   });
   ipcMain.on("sakura:open-settings", () => openSettings());
+  ipcMain.on("sakura:open-chat", () => openChatWindow());
+  ipcMain.on("sakura:close-chat", () => closeChatWindow());
+  ipcMain.on("sakura:chat-preview", (_event, open: unknown) => {
+    if (!chatWin || chatWin.isDestroyed()) return;
+    chatPreview = Boolean(open);
+    placeChatWindow();
+  });
   ipcMain.on("sakura:quit", () => app.quit());
 
   ipcMain.handle("sakura:work-area", (event) => {

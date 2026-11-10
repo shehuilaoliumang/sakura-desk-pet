@@ -15,6 +15,9 @@ export interface SakuraPetBridge {
   beginDrag(): void;
   endDrag(): void;
   openSettings(): void;
+  openChat?(): void;
+  closeChat?(): void;
+  setChatPreview?(open: boolean): void;
   quit(): void;
   reveal(target: "settings" | "pack"): void;
   setMouseIgnore(ignore: boolean): void;

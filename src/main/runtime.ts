@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import { defaultSettings } from "../shared/defaults";
+import { chatWithLlm, testLlmConnection, type LlmCallResult } from "../shared/llm";
 import { linesFromBroadcast, speakFor } from "../shared/lines";
 import { effectivePersonas } from "../shared/persona";
 import { parseSettings } from "../shared/schema";
@@ -262,6 +263,25 @@ export class PetRuntime extends EventEmitter {
     return this.say;
   }
 
+  /**
+   * One deliberate chat turn. Does not change work status and does not read the
+   * status template pools. Failures still show `LLM_FALLBACK_LINE`.
+   */
+  async speakWithLlm(message: string, image?: string): Promise<LlmCallResult & { filtered: boolean; spoke: boolean }> {
+    const result = await chatWithLlm(this.settings, message, undefined, image);
+    const quiet = Boolean(image) && !result.ok;
+    if (quiet) return { ...result, filtered: false, spoke: false };
+    this.clearBubbleTimer();
+    this.setBroadcast(result.text, chatSpeaker(this.settings), 0, false);
+    this.emit("change", "status");
+    return { ...result, text: this.say.text || result.text, filtered: this.say.filtered, spoke: true };
+  }
+
+  /** Probe the configured endpoint. Does not change the bubble or work status. */
+  testLlm(): Promise<LlmCallResult> {
+    return testLlmConnection(this.settings);
+  }
+
   clearBubble(): void {
     this.clearBubbleTimer();
     this.say = {
@@ -493,6 +513,14 @@ export class PetRuntime extends EventEmitter {
       // a missing watcher only means new files wait until the next reload
     }
   }
+}
+
+function chatSpeaker(settings: Settings): Speaker | "both" {
+  const form = settings.activeForm;
+  if (form === "duo" && settings.duoVoice.dualBubble) return "both";
+  if (form === "normal" || form === "form4" || form === "form5") return "normal";
+  if (form === "duo" && settings.duoVoice.darkShare < 50) return "normal";
+  return "dark";
 }
 
 function blankSay(form: FormId, event: PetEvent): SayData {

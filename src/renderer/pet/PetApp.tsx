@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { bubbleStackReserve, type PetLayoutEvent } from "@shared/screenLayout";
 import { FORM_IDS, STATUS_LABEL, type FormId, type PackClip, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
+import { ChatPanel } from "../chat/ChatPanel";
 import { openSettings, postForm, putWindowScale, quitApp } from "../api";
 import { useBackend } from "../useBackend";
 import { PetFigure } from "./figures";
@@ -15,6 +16,9 @@ export function PetApp() {
   const draggingRef = useRef(false);
   const [reaction, setReaction] = useState(false);
   const [zoomHint, setZoomHint] = useState<number | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatTall, setChatTall] = useState(false);
+  const [chatBox, setChatBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [layout, setLayout] = useState<PetLayoutEvent | null>(null);
   const scaleRef = useRef(1);
   const zoomTimer = useRef<number | null>(null);
@@ -31,9 +35,97 @@ export function PetApp() {
   const poseFrames = framesFor(formPack?.clips.find((item) => item.state === mood), formPack?.clips.find((item) => item.state === "idle"));
   const clickFrames = formPack?.click?.frames ?? [];
 
+  const openDialogue = () => {
+    setMenu(null);
+    setMenuPad(null);
+    void window.sakuraPet?.restoreMenu?.();
+    if (window.sakuraPet?.openChat) {
+      window.sakuraPet.openChat();
+      return;
+    }
+    setChatOpen((open) => {
+      if (open) setChatTall(false);
+      return !open;
+    });
+  };
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings?.theme === "glass" ? "glass" : "warm";
+  }, [settings?.theme]);
+
+  useEffect(() => {
+    if (!chatOpen || window.sakuraPet?.openChat) return;
+    const place = () => {
+      const stage = stageRef.current?.getBoundingClientRect();
+      if (!stage) return;
+      const gap = 16;
+      const wantW = 420;
+      const wantH = chatTall ? 440 : 300;
+      const roomRight = window.innerWidth - stage.right - gap;
+      const roomLeft = stage.left - gap;
+      const height = Math.min(wantH, Math.max(220, window.innerHeight - 24));
+      const top = Math.max(8, Math.min(stage.top, window.innerHeight - height - 8));
+      if (roomRight >= 260) {
+        setChatBox({
+          left: Math.round(stage.right + gap),
+          top: Math.round(top),
+          width: Math.round(Math.min(wantW, roomRight - 8)),
+          height: Math.round(height),
+        });
+        return;
+      }
+      if (roomLeft >= 260) {
+        const width = Math.min(wantW, roomLeft - 8);
+        setChatBox({
+          left: Math.round(stage.left - gap - width),
+          top: Math.round(top),
+          width: Math.round(width),
+          height: Math.round(height),
+        });
+        return;
+      }
+      const width = Math.min(wantW, window.innerWidth - 16);
+      setChatBox({
+        left: Math.round(Math.max(8, stage.left + (stage.width - width) / 2)),
+        top: Math.round(Math.min(window.innerHeight - height - 8, stage.bottom + gap)),
+        width: Math.round(width),
+        height: Math.round(height),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [chatOpen, chatTall, activeForm, settings?.window.scale]);
+
+  useEffect(() => {
+    if (!chatOpen || window.sakuraPet?.openChat) return;
+    const close = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest(".chat-dock") || target?.closest(".menu")) return;
+      setChatOpen(false);
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [chatOpen]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.repeat) return;
+      if (event.key === "Escape") {
+        setChatOpen(false);
+        setMenu(null);
+        setMenuPad(null);
+        void window.sakuraPet?.restoreMenu?.();
+        window.sakuraPet?.closeChat?.();
+        return;
+      }
+      if ((event.key === "l" || event.key === "L") && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+        event.preventDefault();
+        openDialogue();
+        return;
+      }
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       const byKey: Record<string, FormId | undefined> = {
         "1": "normal",
@@ -48,7 +140,6 @@ export function PetApp() {
         setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.();
       }
       if (event.key === ",") openSettings();
-      if (event.key === "Escape") setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -221,7 +312,7 @@ export function PetApp() {
       onContextMenu={(event) => {
         event.preventDefault();
         void (async () => {
-          const prepared = await window.sakuraPet?.prepareMenu?.({ width: 188, height: 300 });
+          const prepared = await window.sakuraPet?.prepareMenu?.({ width: 188, height: 280 });
           if (prepared) {
             setMenuPad(prepared.pad);
             setMenu({
@@ -238,11 +329,11 @@ export function PetApp() {
           const stage = stageRef.current?.getBoundingClientRect();
           setMenu({
             x: Math.max(8, Math.min(event.clientX, window.innerWidth - 196)),
-            y: Math.max(8, Math.min(event.clientY, window.innerHeight - 260)),
+            y: Math.max(8, Math.min(event.clientY, window.innerHeight - 240)),
             side: "right",
             clampH: window.innerHeight - 8,
             menuW: Math.min(188, Math.max(96, window.innerWidth - 16)),
-            menuH: Math.min(300, Math.max(120, window.innerHeight - 16)),
+            menuH: Math.min(280, Math.max(140, window.innerHeight - 16)),
           });
           void stage;
         })();
@@ -285,6 +376,7 @@ export function PetApp() {
             maxHeight: menu.menuH ?? menu.clampH,
           }}
           onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.stopPropagation()}
         >
           <div className="menu-status" aria-live="polite">
             <span className={`lamp ${work.state}`} />
@@ -300,25 +392,42 @@ export function PetApp() {
               aria-pressed={id === activeForm}
               onClick={() => { void postForm(id); setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.(); }}
             >
-              {settings.forms[id].displayName}
+              <span>{settings.forms[id].displayName}</span>
+              <span className="hint-key">{formShortcut(id)}</span>
             </button>
           ))}
           <hr />
+          <button
+            type="button"
+            onClick={() => openDialogue()}
+          >
+            <span>对话</span>
+            <span className="hint-key">L</span>
+          </button>
           <button type="button" onClick={() => { openSettings(); setMenu(null); setMenuPad(null); void window.sakuraPet?.restoreMenu?.(); }}>
-            设置
+            <span>设置</span>
+            <span className="hint-key">,</span>
           </button>
           {window.sakuraPet ? (
             <button type="button" onClick={() => quitApp()}>
-              退出
+              <span>退出</span>
             </button>
           ) : (
             <button type="button" onClick={() => { window.location.hash = "#/settings"; }}>
-              在这页打开设置
+              <span>在这页打开设置</span>
             </button>
           )}
         </div>
       ) : null}
 
+      {chatOpen && !window.sakuraPet?.openChat && chatBox ? (
+        <div className="chat-dock-slot" style={{ left: chatBox.left, top: chatBox.top, width: chatBox.width, height: chatBox.height }}>
+          <ChatPanel
+            onClose={() => { setChatOpen(false); setChatTall(false); }}
+            onPreview={setChatTall}
+          />
+        </div>
+      ) : null}
       {zoomHint != null ? <div className="zoom-hint" data-no-drag data-hit>{zoomHint}%</div> : null}
       {backend.error ? <p className="pet-error" data-no-drag>{backend.error}</p> : null}
     </div>
@@ -326,6 +435,14 @@ export function PetApp() {
 }
 
 
+
+function formShortcut(id: FormId): string {
+  if (id === "normal") return "1";
+  if (id === "dark") return "2";
+  if (id === "duo") return "3";
+  if (id === "form4") return "4";
+  return "5";
+}
 
 function bubbleCols(form: FormId, lineCount: number, scale: number): number {
   if (form === "duo") return scale >= 0.6 ? 2 : 1;

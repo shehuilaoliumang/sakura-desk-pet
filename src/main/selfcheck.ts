@@ -2,6 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { defaultSettings } from "../shared/defaults";
+import { parseSettings } from "../shared/schema";
+import { LLM_FALLBACK_LINE, buildChatSystemPrompt, chatWithLlm, openAiCompatibleChatUrl, type LlmFetch } from "../shared/llm";
 import { PetRuntime } from "./runtime";
 import { startServer } from "./server";
 import type { PublicState, Settings } from "../shared/types";
@@ -173,6 +176,10 @@ async function main(): Promise<void> {
     assert(boot.settings.activeForm === "duo", "boot uses the default form, not the stale active form");
     boot.dispose();
 
+    await checkLlm(base, user, appRoot);
+    await checkReasoningReply();
+    await checkDuoPartnerRetry();
+
     console.log("sakura-pet selfcheck ok");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -210,6 +217,425 @@ async function call(
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** LLM calls are mocked. Work-status must not touch the mock. */
+async function checkLlm(base: string, user: Record<string, string>, root: string): Promise<void> {
+  const secret = "unit-test-key";
+  const fresh = (await call(base, "GET", "/pet/config")).json.settings as Settings;
+  assert(fresh.llm.enabled === false, "llm defaults off");
+  assert(fresh.llm.provider === "openai-compatible", "default llm provider");
+  assert(fresh.llm.apiKey === "", "llm key defaults empty");
+  assert(fresh.llm.baseUrl === "", "llm base url defaults empty");
+  assert(fresh.theme === "warm", "default theme is warm");
+  assert(openAiCompatibleChatUrl("https://llm.invalid/v1") === "https://llm.invalid/v1/chat/completions", "v1 base joins chat completions");
+  assert(openAiCompatibleChatUrl("https://llm.invalid/v1/") === "https://llm.invalid/v1/chat/completions", "trailing slash is stripped");
+  assert(openAiCompatibleChatUrl("https://llm.invalid") === "https://llm.invalid/v1/chat/completions", "host gets /v1/chat/completions");
+  assert(openAiCompatibleChatUrl("https://llm.invalid/v1/chat/completions") === "https://llm.invalid/v1/chat/completions", "full path is kept");
+  const prompt = buildChatSystemPrompt(fresh);
+  assert(prompt.includes("老板"), "chat prompt keeps the honorific");
+  assert(prompt.includes("黑樱"), "chat prompt keeps the active form");
+  assert(prompt.includes("||"), "duo chat asks both voices for a line");
+  assert(prompt.includes("都是对用户说的"), "duo lines both address the user");
+  assert(prompt.includes("称呼用户为「老板」"), "both lines use the configured honorific");
+  assert(prompt.includes("不要互相接话") && prompt.includes("不要互相点评"), "duo lines must not talk to each other");
+  assert(prompt.includes("不要介绍对方") && prompt.includes("不要评价对方"), "duo lines must not describe each other");
+  assert(prompt.includes("不要出现「黑樱」") && prompt.includes("不要出现「常态樱」"), "duo lines forbid each other's names");
+  assert(!prompt.includes("一句附和"), "duo prompt does not ask for an echo");
+
+  const realFetch = globalThis.fetch;
+  let externalCalls = 0;
+  let lastUrl = "";
+  let sawBearer = false;
+  let sawModel = false;
+  let sawPrompt = false;
+  let mode: "ok" | "http" | "taboo" | "vision" | "duo" | "duo-nl" = "ok";
+  let lastSystem = "";
+  let sawImage = false;
+  let sawReasoningEffort: unknown;
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) return realFetch(input, init);
+    externalCalls += 1;
+    lastUrl = url;
+    const headers = new Headers(init?.headers);
+    sawBearer = headers.get("authorization") === `Bearer ${secret}`;
+    if (mode === "http") {
+      return new Response(JSON.stringify({ error: { message: `rejected ${secret}` } }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (mode === "vision") {
+      return new Response(JSON.stringify({ error: { message: "image input is not supported" } }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) as { model?: string; messages?: { role: string; content: unknown }[]; reasoning_effort?: unknown } : {};
+    sawModel = body.model === "gpt-4o-mini";
+    sawReasoningEffort = body.reasoning_effort;
+    const systemRaw = body.messages?.find((item) => item.role === "system")?.content;
+    const system = typeof systemRaw === "string" ? systemRaw : "";
+    if (system) {
+      sawPrompt = system.includes("老板") && system.includes("黑樱");
+      lastSystem = system;
+    }
+    const userRaw = body.messages?.find((item) => item.role === "user")?.content;
+    if (Array.isArray(userRaw)) {
+      sawImage = userRaw.some((part) => !!part && typeof part === "object" && (part as { type?: string }).type === "image_url");
+    }
+    const content = mode === "taboo"
+      ? "你这个笨蛋"
+      : mode === "duo"
+        ? "别怕。||……嗯。"
+        : mode === "duo-nl"
+          ? "别怕呀。\n……好。"
+          : "在的，老板。";
+    return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const idle = await stateOf(base);
+    const callsAtIdle = externalCalls;
+    await call(base, "POST", "/pet/work-status", { state: "thinking", task: "不要问模型" });
+    let state = await stateOf(base);
+    assert(externalCalls === callsAtIdle, "work-status does not call the llm");
+    assert(state.pets.sakura.say.data.origin === "persona", "status line stays on the template pool");
+    assert(state.pets.sakura.say.data.text.includes("老板"), "template still uses the honorific");
+    assert(!state.pets.sakura.say.data.text.includes(LLM_FALLBACK_LINE), "template is not the llm fallback");
+    const workCounter = state.sections.workStatus.counter;
+
+    const denied = await call(base, "POST", "/pet/llm/chat", { message: "在吗" });
+    assert(denied.status === 403 && denied.json.reason === "user-only", "llm chat is user-only");
+    const empty = await call(base, "POST", "/pet/llm/chat", { message: "  " }, user);
+    assert(empty.status === 400 && empty.json.reason === "empty-text", "empty chat is rejected");
+
+    const quiet = await call(base, "POST", "/pet/llm/chat", { message: "在吗" }, user);
+    assert(quiet.status === 200 && quiet.json.ok === false, "disabled llm does not pretend to succeed");
+    assert(quiet.json.source === "fallback" && quiet.json.reason === "disabled", "disabled llm reports why");
+    assert(quiet.json.text === LLM_FALLBACK_LINE, "disabled llm speaks the local line");
+    assert(externalCalls === callsAtIdle, "disabled llm does not call out");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.text === LLM_FALLBACK_LINE, "fallback line is on the bubble");
+    assert(state.sections.workStatus.counter === workCounter, "fallback chat does not change work status");
+    assert(state.sections.workStatus.data.state === "thinking", "work state survived the fallback line");
+
+    const saved = await call(base, "PUT", "/pet/config", {
+      llm: {
+        enabled: true,
+        provider: "openai-compatible",
+        baseUrl: "https://llm.invalid/v1",
+        apiKey: secret,
+        model: "",
+        timeoutMs: 1000,
+      },
+    }, user);
+    assert(saved.status === 200, "llm settings saved");
+    const stored = (saved.json.settings as Settings).llm;
+    assert(stored.enabled === true && stored.baseUrl === "https://llm.invalid/v1", "llm settings round-trip");
+    assert(stored.apiKey === secret, "llm key stored locally");
+
+    const callsBeforeStatus = externalCalls;
+    await call(base, "POST", "/pet/work-status", { state: "working", task: "仍然用短句" });
+    state = await stateOf(base);
+    assert(externalCalls === callsBeforeStatus, "enabled llm still stays out of work-status");
+    assert(state.pets.sakura.say.data.origin === "persona", "enabled llm does not replace status lines");
+    assert(state.sections.config.data.activeForm === "duo", "llm settings do not switch form");
+    assert(!state.pets.sakura.say.data.text.includes("在的，老板"), "status text is not an llm line");
+    const workAfter = state.sections.workStatus.counter;
+
+    const spoken = await call(base, "POST", "/pet/llm/chat", { message: "在吗" }, user);
+    assert(spoken.status === 200 && spoken.json.ok === true && spoken.json.source === "llm", "chat uses the provider");
+    assert(sawModel, "empty model falls back to gpt-4o-mini");
+    assert(sawPrompt, "outbound system prompt has the honorific and the form");
+    assert(spoken.json.text === "在的，老板。", "chat bubble is the assistant line");
+    assert(lastUrl === "https://llm.invalid/v1/chat/completions", "chat posts to chat completions");
+    assert(sawBearer, "chat sends the bearer token");
+    assert(externalCalls === callsBeforeStatus + 1, "chat makes one provider call");
+    assert(sawReasoningEffort === undefined, "a cloud model does not get reasoning_effort");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.text === "在的，老板。", "pet shows the assistant line");
+    assert(state.pets.sakura.say.data.origin === "broadcast", "chat line is not a status template");
+    assert(state.sections.workStatus.counter === workAfter, "chat does not change work status");
+    assert(state.sections.workStatus.data.state === "working", "work state survived the chat");
+
+    await call(base, "POST", "/pet/work-status", { state: "idle", task: "" });
+    state = await stateOf(base);
+    assert(externalCalls === callsBeforeStatus + 1, "returning to a status does not call the llm");
+    assert(state.pets.sakura.say.data.origin === "persona", "status template returns after chat");
+    assert(state.pets.sakura.say.data.text !== "在的，老板。", "status template replaced the chat line");
+    const templateAfter = state.pets.sakura.say.data.text;
+
+    const probe = await call(base, "POST", "/pet/llm/test", {}, user);
+    assert(probe.status === 200 && probe.json.ok === true && probe.json.detail === "连上了。", "test connection reports success");
+    assert(externalCalls === callsBeforeStatus + 2, "test connection calls the provider");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.text === templateAfter, "test connection does not change the bubble");
+
+    mode = "http";
+    const failed = await call(base, "POST", "/pet/llm/test", {}, user);
+    assert(failed.status === 200 && failed.json.ok === false && failed.json.reason === "http", "http error is a failed test");
+    const detail = String(failed.json.detail ?? "");
+    assert(!detail.includes(secret), "error detail redacts the key");
+    assert(detail.includes("500"), "error detail keeps the status");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.text === templateAfter, "failed test does not change the bubble");
+
+    mode = "taboo";
+    const censored = await call(base, "POST", "/pet/llm/chat", { message: "说一个不该说的词" }, user);
+    assert(censored.status === 200 && censored.json.filtered === true, "chat runs the taboo filter");
+    assert(typeof censored.json.text === "string" && !censored.json.text.includes("笨蛋") && censored.json.text.includes("※"), "taboo word removed from the chat line");
+    assert(externalCalls === callsBeforeStatus + 4, "taboo chat still uses the provider");
+
+    await call(base, "PUT", "/pet/config", { llm: { apiKey: "" } }, user);
+    const missing = await call(base, "POST", "/pet/llm/chat", { message: "在吗" }, user);
+    assert(missing.json.reason === "missing-key" && missing.json.text === LLM_FALLBACK_LINE, "missing key uses the local line");
+    const callsAfterMissing = externalCalls;
+    assert(callsAfterMissing === callsBeforeStatus + 4, "missing key does not call out");
+
+    await call(base, "PUT", "/pet/config", { llm: { apiKey: secret, baseUrl: "file:///tmp/sakura-key" } }, user);
+    const badUrl = await call(base, "POST", "/pet/llm/chat", { message: "在吗" }, user);
+    assert(badUrl.json.reason === "bad-base-url", "non-http base url is refused");
+    assert(externalCalls === callsAfterMissing, "bad base url does not call out");
+
+    await call(base, "PUT", "/pet/config", { llm: { baseUrl: "https://user:secret@llm.invalid/v1" } }, user);
+    const userinfo = await call(base, "POST", "/pet/llm/chat", { message: "在吗" }, user);
+    assert(userinfo.json.reason === "bad-base-url", "credentials in the base url are refused");
+    assert(externalCalls === callsAfterMissing, "userinfo url does not call out");
+
+    await call(base, "PUT", "/pet/config", { llm: { provider: "not-a-provider", baseUrl: "https://llm.invalid/v1" } }, user);
+    const unknown = await call(base, "POST", "/pet/llm/chat", { message: "在吗" }, user);
+    assert(unknown.json.reason === "unknown-provider", "unknown provider is refused");
+    assert(externalCalls === callsAfterMissing, "unknown provider does not call out");
+
+    await call(base, "PUT", "/pet/config", {
+      llm: { enabled: true, provider: "openai-compatible", baseUrl: "https://llm.invalid/v1", apiKey: secret, model: "", timeoutMs: 1000 },
+    }, user);
+    mode = "ok";
+    const beforeImage = (await stateOf(base)).pets.sakura.say.data.text;
+    const pictured = await call(base, "POST", "/pet/llm/chat", { message: "看这张", image: "data:image/png;base64,aaaa" }, user);
+    assert(pictured.status === 200 && pictured.json.ok === true, "image chat is sent to the provider");
+    assert(sawImage, "image is attached as an image_url part");
+    const afterImage = (await stateOf(base)).pets.sakura.say.data.text;
+    assert(afterImage === "在的，老板。", "a supported image still speaks one line");
+    mode = "vision";
+    const refused = await call(base, "POST", "/pet/llm/chat", { message: "再看一张", image: "data:image/png;base64,aaaa" }, user);
+    assert(refused.json.ok === false && refused.json.reason === "vision-unsupported", "unsupported vision is reported");
+    assert(String(refused.json.detail ?? "").includes("不支持图片"), "vision failure is explained in Chinese");
+    assert((await stateOf(base)).pets.sakura.say.data.text === afterImage, "a rejected image does not replace the bubble");
+    const callsAfterImage = externalCalls;
+    const badImage = await call(base, "POST", "/pet/llm/chat", { message: "外链", image: "https://example.test/a.png" }, user);
+    assert(badImage.json.reason === "bad-image", "remote image urls are refused");
+    assert(externalCalls === callsAfterImage, "a bad image does not call out");
+    assert(beforeImage !== undefined, "bubble existed before the image");
+
+    const named = await call(base, "PUT", "/pet/config", { llm: { provider: "openai-compatible", model: "深求" } }, user);
+    assert(named.status === 200 && (named.json.settings as Settings).llm.model === "深求", "model name kept");
+    const paths = named.json.paths as { settingsPath?: string };
+    assert(typeof paths.settingsPath === "string", "settings path reported");
+    const settingsBytes = fs.readFileSync(paths.settingsPath ?? "");
+    assert(settingsBytes[0] === 0x7b, "llm settings stay UTF-8");
+    assert(settingsBytes.includes(Buffer.from("深求", "utf8")), "model name stored as UTF-8");
+    assert(settingsBytes.includes(Buffer.from(secret)), "key stays in the local file");
+    assert(idle.sections.config.data.activeForm === "duo", "llm checks started from duo");
+
+    mode = "duo";
+    const paired = await call(base, "POST", "/pet/llm/chat", { message: "两个人都在吗" }, user);
+    assert(paired.status === 200 && paired.json.ok === true, "duo chat succeeds");
+    state = await stateOf(base);
+    const pairedLines = state.pets.sakura.say.data.lines;
+    assert(pairedLines.length === 2, "duo chat keeps two bubbles");
+    assert(pairedLines[0]?.speaker === "dark" && pairedLines[0]?.text === "别怕。", "dark bubble is the first line");
+    assert(pairedLines[1]?.speaker === "normal" && pairedLines[1]?.text === "……嗯。", "normal bubble is the second line");
+    assert(lastSystem.includes("||"), "the live duo prompt asks for both lines");
+    assert(lastSystem.includes("都是对用户说的") && lastSystem.includes("不要互相接话"), "the live duo prompt keeps both lines aimed at the user");
+    assert(lastSystem.includes("不要介绍对方") && lastSystem.includes("不要出现「黑樱」"), "the live duo prompt forbids introducing the other voice");
+    assert(state.pets.sakura.say.data.origin === "broadcast", "duo chat is not a status template");
+
+    mode = "duo-nl";
+    const wrapped = await call(base, "POST", "/pet/llm/chat", { message: "换行也要两句" }, user);
+    assert(wrapped.json.ok === true, "a newline duo reply is accepted");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.lines[0]?.speaker === "dark" && state.pets.sakura.say.data.lines[0]?.text === "别怕呀。", "a newline still feeds the dark bubble");
+    assert(state.pets.sakura.say.data.lines[1]?.speaker === "normal" && state.pets.sakura.say.data.lines[1]?.text === "……好。", "a newline still feeds the normal bubble");
+
+    await call(base, "PUT", "/pet/config", { duoVoice: { dualBubble: false, darkShare: 30 } }, user);
+    mode = "ok";
+    const softer = await call(base, "POST", "/pet/llm/chat", { message: "只留一句" }, user);
+    assert(softer.json.ok === true && softer.json.text === "在的，老板。", "a single bubble still speaks one line");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.lines.length === 1 && state.pets.sakura.say.data.lines[0]?.speaker === "normal", "the softer share gives the line to 常态樱");
+    assert(lastSystem.includes("只说一句"), "a single bubble asks for one line");
+    assert(!lastSystem.includes("||"), "a single bubble does not ask for a split");
+
+    await call(base, "PUT", "/pet/config", { duoVoice: { darkShare: 80 } }, user);
+    const harder = await call(base, "POST", "/pet/llm/chat", { message: "只留黑樱" }, user);
+    assert(harder.json.text === "在的，老板。", "the darker share still speaks one line");
+    state = await stateOf(base);
+    assert(state.pets.sakura.say.data.lines.length === 1 && state.pets.sakura.say.data.lines[0]?.speaker === "dark", "the darker share gives the line to 黑樱");
+    await call(base, "PUT", "/pet/config", { duoVoice: { dualBubble: true, darkShare: 70 } }, user);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  const partialDir = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-pet-llm-"));
+  fs.writeFileSync(path.join(partialDir, "settings.json"), JSON.stringify({ schemaVersion: 1, honorific: "前辈" }), { encoding: "utf8" });
+  const partial = new PetRuntime({ dataDir: partialDir, appRoot: root });
+  partial.load();
+  assert(partial.settings.llm.enabled === false, "old settings file keeps llm off");
+  assert(partial.settings.theme === "warm", "old settings file keeps the warm theme");
+  const glass = await call(base, "PUT", "/pet/config", { theme: "glass" }, user);
+  assert(glass.status === 200 && (glass.json.settings as Settings).theme === "glass", "glass theme persists");
+  const unknown = await call(base, "PUT", "/pet/config", { theme: "neon" }, user);
+  assert((unknown.json.settings as Settings).theme === "glass", "unknown theme is ignored");
+  const warmed = await call(base, "PUT", "/pet/config", { theme: "warm" }, user);
+  assert((warmed.json.settings as Settings).theme === "warm", "warm theme can be restored");
+  assert(partial.settings.llm.provider === "openai-compatible", "old settings file gets the default provider");
+  assert(partial.settings.llm.apiKey === "", "old settings file does not invent a key");
+  assert(partial.settings.llm.reasoningEffort === "auto", "old settings file skips reasoning by default");
+  assert(partial.settings.honorific === "前辈", "old settings file keeps the honorific");
+  partial.dispose();
+  fs.rmSync(partialDir, { recursive: true, force: true });
+}
+
+async function checkReasoningReply(): Promise<void> {
+  const settings = defaultSettings();
+  settings.llm.enabled = true;
+  settings.llm.baseUrl = "http://127.0.0.1:12345/v1";
+  settings.llm.apiKey = "local-placeholder";
+  settings.llm.model = "qwen3.5-9b";
+  const thinking = "先在心里想了很久，这段不该出现在气泡里。";
+
+  const budgets: number[] = [];
+  const efforts: unknown[] = [];
+  let round = 0;
+  const retrying: LlmFetch = async (_url, init) => {
+    const body = JSON.parse(init.body) as { max_tokens?: number; reasoning_effort?: unknown };
+    budgets.push(body.max_tokens ?? 0);
+    efforts.push(body.reasoning_effort);
+    round += 1;
+    const message = round === 1
+      ? { content: "", reasoning_content: thinking }
+      : { content: `<think>${thinking}</think>在的，前辈。`, reasoning_content: thinking };
+    return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message }] }) };
+  };
+  const spoken = await chatWithLlm(settings, "在吗", retrying);
+  assert(budgets[0] === 2048 && budgets[1] === 4096, "a thinking reply gets one larger retry");
+  assert(efforts[0] === "none" && efforts[1] === "none", "local Qwen asks the model not to think");
+  assert(spoken.ok && spoken.text === "在的，前辈。", "the bubble uses the final content");
+  assert(!spoken.text.includes("不该出现"), "reasoning is not spoken");
+
+  let both = 0;
+  const together: LlmFetch = async () => {
+    both += 1;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: "好的。", reasoning_content: thinking } }],
+      }),
+    };
+  };
+  const direct = await chatWithLlm(settings, "在吗", together);
+  assert(both === 1 && direct.ok && direct.text === "好的。", "content wins and skips the retry");
+
+  let stuck = 0;
+  const reasoningOnly: LlmFetch = async () => {
+    stuck += 1;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ choices: [{ message: { content: null, reasoning_content: thinking } }] }),
+    };
+  };
+  const quiet = await chatWithLlm(settings, "在吗", reasoningOnly);
+  assert(stuck === 2 && !quiet.ok && quiet.text === LLM_FALLBACK_LINE, "reasoning without a line stays on the short fallback");
+  assert(!quiet.detail.includes("不该出现"), "the failure detail does not paste the thinking");
+  assert(quiet.detail.includes("思考"), "the failure says the model only thought");
+
+  settings.llm.reasoningEffort = "none";
+  settings.llm.baseUrl = "https://api.openai.com/v1";
+  settings.llm.model = "gpt-4o-mini";
+  assert(await effortOf(settings) === "none", "直接说短句 always sends reasoning_effort none");
+  settings.llm.reasoningEffort = "off";
+  assert(await effortOf(settings) === undefined, "允许思考 omits reasoning_effort");
+  settings.llm.reasoningEffort = "auto";
+  assert(await effortOf(settings) === undefined, "auto leaves cloud models alone");
+  settings.llm.model = "qwen3.5-9b";
+  assert(await effortOf(settings) === "none", "auto still skips thinking for Qwen");
+  settings.llm.baseUrl = "http://localhost:11434/v1";
+  settings.llm.model = "llama";
+  assert(await effortOf(settings) === "none", "auto skips thinking on loopback");
+
+  const kept = parseSettings({ llm: { reasoningEffort: "none" } });
+  assert(kept.ok && kept.settings.llm.reasoningEffort === "none", "reasoning effort persists");
+  const ignored = parseSettings({ llm: { reasoningEffort: "high" } });
+  assert(ignored.ok && ignored.settings.llm.reasoningEffort === "auto", "unknown reasoning effort stays auto");
+}
+
+async function checkDuoPartnerRetry(): Promise<void> {
+  const settings = defaultSettings();
+  settings.activeForm = "duo";
+  settings.darkMayAddressDirectly = true;
+  settings.honorific = "前辈";
+  settings.llm.enabled = true;
+  settings.llm.baseUrl = "http://127.0.0.1:12345/v1";
+  settings.llm.apiKey = "local-placeholder";
+  settings.llm.model = "qwen3.5-9b";
+  settings.llm.reasoningEffort = "off";
+
+  let calls = 0;
+  const named = await chatWithLlm(settings, "下午好", async () => {
+    calls += 1;
+    const content = calls === 1
+      ? "下午好啊。||下午好，前辈！黑樱她平时虽然嘴硬心软，但其实是世界上最温柔的人呢。"
+      : "下午好啊。||下午好，前辈。";
+    return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content } }] }) };
+  });
+  assert(calls === 2, "naming the other voice asks once more");
+  assert(named.ok && named.text === "下午好啊。||下午好，前辈。", "the retry drops the other voice");
+  assert(!named.text.includes("黑樱"), "the spoken lines do not name 黑樱");
+
+  let cleanCalls = 0;
+  const clean = await chatWithLlm(settings, "今天还顺利吗", async () => {
+    cleanCalls += 1;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: "别用那种语调问我。||前辈辛苦了，今天还算顺利。" } }],
+      }),
+    };
+  });
+  assert(cleanCalls === 1 && clean.ok && clean.text.includes("前辈"), "addressing the user does not retry");
+  assert(!clean.text.includes("黑樱") && !clean.text.includes("常态樱"), "a clean pair names nobody else");
+
+  let guardCalls = 0;
+  const guarding = await chatWithLlm(settings, "在吗", async () => {
+    guardCalls += 1;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: "我会保护你。||在的，前辈。" } }],
+      }),
+    };
+  });
+  assert(guardCalls === 1 && guarding.ok && guarding.text.includes("前辈"), "protecting the user is not treated as mentioning the other voice");
+}
+
+async function effortOf(settings: ReturnType<typeof defaultSettings>): Promise<unknown> {
+  let effort: unknown = "missing";
+  const result = await chatWithLlm(settings, "在吗", async (_url, init) => {
+    effort = (JSON.parse(init.body) as { reasoning_effort?: unknown }).reasoning_effort;
+    return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "你好呀" } }] }) };
+  });
+  assert(result.ok && result.text === "你好呀", "a short content line is spoken");
+  return effort;
 }
 
 main().catch((error: unknown) => {
