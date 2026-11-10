@@ -238,7 +238,8 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
   let sawBearer = false;
   let sawModel = false;
   let sawPrompt = false;
-  let mode: "ok" | "http" | "taboo" = "ok";
+  let mode: "ok" | "http" | "taboo" | "vision" = "ok";
+  let sawImage = false;
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) return realFetch(input, init);
@@ -252,10 +253,21 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
         headers: { "content-type": "application/json" },
       });
     }
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) as { model?: string; messages?: { role: string; content: string }[] } : {};
+    if (mode === "vision") {
+      return new Response(JSON.stringify({ error: { message: "image input is not supported" } }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) as { model?: string; messages?: { role: string; content: unknown }[] } : {};
     sawModel = body.model === "gpt-4o-mini";
-    const system = body.messages?.find((item) => item.role === "system")?.content ?? "";
+    const systemRaw = body.messages?.find((item) => item.role === "system")?.content;
+    const system = typeof systemRaw === "string" ? systemRaw : "";
     if (system) sawPrompt = system.includes("老板") && system.includes("黑樱");
+    const userRaw = body.messages?.find((item) => item.role === "user")?.content;
+    if (Array.isArray(userRaw)) {
+      sawImage = userRaw.some((part) => !!part && typeof part === "object" && (part as { type?: string }).type === "image_url");
+    }
     const content = mode === "taboo" ? "你这个笨蛋" : "在的，老板。";
     return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
       status: 200,
@@ -375,6 +387,27 @@ async function checkLlm(base: string, user: Record<string, string>, root: string
     const unknown = await call(base, "POST", "/pet/llm/chat", { message: "在吗" }, user);
     assert(unknown.json.reason === "unknown-provider", "unknown provider is refused");
     assert(externalCalls === callsAfterMissing, "unknown provider does not call out");
+
+    await call(base, "PUT", "/pet/config", {
+      llm: { enabled: true, provider: "openai-compatible", baseUrl: "https://llm.invalid/v1", apiKey: secret, model: "", timeoutMs: 1000 },
+    }, user);
+    mode = "ok";
+    const beforeImage = (await stateOf(base)).pets.sakura.say.data.text;
+    const pictured = await call(base, "POST", "/pet/llm/chat", { message: "看这张", image: "data:image/png;base64,aaaa" }, user);
+    assert(pictured.status === 200 && pictured.json.ok === true, "image chat is sent to the provider");
+    assert(sawImage, "image is attached as an image_url part");
+    const afterImage = (await stateOf(base)).pets.sakura.say.data.text;
+    assert(afterImage === "在的，老板。", "a supported image still speaks one line");
+    mode = "vision";
+    const refused = await call(base, "POST", "/pet/llm/chat", { message: "再看一张", image: "data:image/png;base64,aaaa" }, user);
+    assert(refused.json.ok === false && refused.json.reason === "vision-unsupported", "unsupported vision is reported");
+    assert(String(refused.json.detail ?? "").includes("不支持图片"), "vision failure is explained in Chinese");
+    assert((await stateOf(base)).pets.sakura.say.data.text === afterImage, "a rejected image does not replace the bubble");
+    const callsAfterImage = externalCalls;
+    const badImage = await call(base, "POST", "/pet/llm/chat", { message: "外链", image: "https://example.test/a.png" }, user);
+    assert(badImage.json.reason === "bad-image", "remote image urls are refused");
+    assert(externalCalls === callsAfterImage, "a bad image does not call out");
+    assert(beforeImage !== undefined, "bubble existed before the image");
 
     const named = await call(base, "PUT", "/pet/config", { llm: { provider: "openai-compatible", model: "深求" } }, user);
     assert(named.status === 200 && (named.json.settings as Settings).llm.model === "深求", "model name kept");

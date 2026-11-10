@@ -267,12 +267,14 @@ export class PetRuntime extends EventEmitter {
    * One deliberate chat turn. Does not change work status and does not read the
    * status template pools. Failures still show `LLM_FALLBACK_LINE`.
    */
-  async speakWithLlm(message: string): Promise<LlmCallResult & { filtered: boolean }> {
-    const result = await chatWithLlm(this.settings, message);
+  async speakWithLlm(message: string, image?: string): Promise<LlmCallResult & { filtered: boolean; spoke: boolean }> {
+    const result = await chatWithLlm(this.settings, message, undefined, image);
+    const quiet = Boolean(image) && !result.ok;
+    if (quiet) return { ...result, filtered: false, spoke: false };
     this.clearBubbleTimer();
     this.setBroadcast(result.text, chatSpeaker(this.settings.activeForm), 0, false);
     this.emit("change", "status");
-    return { ...result, text: this.say.text || result.text, filtered: this.say.filtered };
+    return { ...result, text: this.say.text || result.text, filtered: this.say.filtered, spoke: true };
   }
 
   /** Probe the configured endpoint. Does not change the bubble or work status. */

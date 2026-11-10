@@ -28,7 +28,9 @@ export type LlmFailReason =
   | "timeout"
   | "http"
   | "network"
-  | "empty-reply";
+  | "empty-reply"
+  | "bad-image"
+  | "vision-unsupported";
 
 export interface LlmCallResult {
   ok: boolean;
@@ -40,9 +42,13 @@ export interface LlmCallResult {
   detail: string;
 }
 
+export type LlmContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface LlmMessage {
   role: "system" | "user";
-  content: string;
+  content: string | LlmContentPart[];
 }
 
 interface LlmFetchInit {
@@ -127,14 +133,43 @@ export function buildChatSystemPrompt(settings: Settings): string {
   ].join("\n");
 }
 
-export async function chatWithLlm(settings: Settings, message: string, fetchImpl?: LlmFetch): Promise<LlmCallResult> {
+const IMAGE_DATA = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
+/** One local image, already a data URL. Empty means text-only. */
+export function normalizeChatImage(image: string | undefined): { ok: true; image: string | null } | { ok: false; detail: string } {
+  if (!image) return { ok: true, image: null };
+  const compact = image.replace(/\s/g, "");
+  if (!compact) return { ok: true, image: null };
+  if (compact.length > 2_800_000) return { ok: false, detail: "图片太大，请换一张小一点的" };
+  if (!IMAGE_DATA.test(compact)) return { ok: false, detail: "只接受 png、jpeg、webp 或 gif" };
+  return { ok: true, image: compact };
+}
+
+export async function chatWithLlm(
+  settings: Settings,
+  message: string,
+  fetchImpl?: LlmFetch,
+  image?: string,
+): Promise<LlmCallResult> {
+  const picture = normalizeChatImage(image);
+  if (!picture.ok) return fallback("bad-image", picture.detail);
   const trimmed = message.trim().slice(0, 400);
-  if (!trimmed) return fallback("empty", "没有要说的话");
+  if (!trimmed && !picture.image) return fallback("empty", "没有要说的话");
   const ready = prepare(settings, "chat");
   if (!ready.ok) return ready.result;
+  const spoken = trimmed || "请看这张图。";
+  const user: LlmMessage = picture.image
+    ? {
+      role: "user",
+      content: [
+        { type: "text", text: spoken },
+        { type: "image_url", image_url: { url: picture.image } },
+      ],
+    }
+    : { role: "user", content: spoken };
   const messages: LlmMessage[] = [
-    { role: "system", content: buildChatSystemPrompt(settings) },
-    { role: "user", content: trimmed },
+    { role: "system", content: picture.image ? `${buildChatSystemPrompt(settings)}\n对方发来一张图。用一句中文口语说说你看到的。` : buildChatSystemPrompt(settings) },
+    user,
   ];
   return run(ready.provider, ready, messages, 200, 0.7, fetchImpl ?? defaultFetch());
 }
@@ -254,6 +289,9 @@ async function completeOpenAiCompatible(input: LlmCompleteInput): Promise<LlmCom
     });
     const raw = await response.text();
     if (!response.ok) {
+      if (requestHasImage(input.messages) && visionRejected(raw)) {
+        return { ok: false, reason: "vision-unsupported", detail: "这个接口或模型不支持图片。换一个能看图的模型，或去掉图片再发。" };
+      }
       return { ok: false, reason: "http", detail: httpDetail(response.status, raw, input.apiKey) };
     }
     let payload: unknown;
@@ -297,6 +335,14 @@ function readContent(content: unknown): string {
     }
     return "";
   }).join("");
+}
+
+function requestHasImage(messages: LlmMessage[]): boolean {
+  return messages.some((message) => Array.isArray(message.content) && message.content.some((part) => part.type === "image_url"));
+}
+
+function visionRejected(raw: string): boolean {
+  return /image|vision|multimodal|image_url/i.test(raw);
 }
 
 function httpDetail(status: number, raw: string, secret: string): string {

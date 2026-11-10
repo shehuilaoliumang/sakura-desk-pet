@@ -72,11 +72,11 @@ export async function postLlmTest(): Promise<LlmRouteResult> {
   return response.json() as Promise<LlmRouteResult>;
 }
 
-export async function postLlmChat(message: string): Promise<LlmRouteResult> {
+export async function postLlmChat(message: string, image?: string): Promise<LlmRouteResult> {
   const response = await fetch("/pet/llm/chat", {
     method: "POST",
     headers: userHeaders,
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(image ? { message, image } : { message }),
   });
   return response.json() as Promise<LlmRouteResult>;
 }

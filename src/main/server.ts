@@ -248,9 +248,11 @@ async function handle(runtime: PetRuntime, req: http.IncomingMessage, res: http.
 
   if (req.method === "POST" && stripped === "/llm/chat") {
     if (!isUser(req)) throw new HttpError(403, "user-only");
-    const body = await readJson(req);
-    if (!isRecord(body) || typeof body.message !== "string" || !body.message.trim()) throw new HttpError(400, "empty-text");
-    const result = await runtime.speakWithLlm(body.message);
+    const body = await readJson(req, 4_000_000);
+    if (!isRecord(body) || typeof body.message !== "string") throw new HttpError(400, "empty-text");
+    const image = typeof body.image === "string" ? body.image : undefined;
+    if (!body.message.trim() && !image) throw new HttpError(400, "empty-text");
+    const result = await runtime.speakWithLlm(body.message, image);
     log(req.method, url.pathname, `source=${result.source} reason=${result.reason ?? "ok"} form=${runtime.settings.activeForm}`);
     send(res, 200, {
       ok: result.ok,
@@ -375,7 +377,7 @@ function mediaUrlAllowed(url: string, port: number): boolean {
   }
 }
 
-function readJson(req: http.IncomingMessage): Promise<unknown> {
+function readJson(req: http.IncomingMessage, maxBytes = 65_536): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -400,7 +402,7 @@ function readJson(req: http.IncomingMessage): Promise<unknown> {
     };
     const onData = (chunk: Buffer) => {
       size += chunk.length;
-      if (size > 65_536) {
+      if (size > maxBytes) {
         finish(new HttpError(413, "too-large"));
         req.destroy();
         return;
