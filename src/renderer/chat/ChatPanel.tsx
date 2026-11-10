@@ -18,7 +18,13 @@ type SpeechResultEvent = {
   results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
 };
 
-export function ChatPanel({ onClose }: { onClose: () => void }) {
+export function ChatPanel({
+  onClose,
+  onPreview,
+}: {
+  onClose: () => void;
+  onPreview?: (open: boolean) => void;
+}) {
   const backend = useBackend();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,9 +48,11 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => () => {
-    stopCamera();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
     speechRef.current?.stop();
-  }, []);
+    window.sakuraPet?.setChatPreview?.(false);
+    onPreview?.(false);
+  }, [onPreview]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -56,11 +64,17 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const notifyPreview = (open: boolean) => {
+    window.sakuraPet?.setChatPreview?.(open);
+    onPreview?.(open);
+  };
+
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraOn(false);
+    notifyPreview(false);
   };
 
   const attachImage = async (file: File) => {
@@ -93,6 +107,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
       streamRef.current = stream;
       setCameraOn(true);
+      notifyPreview(true);
       setNote("");
       window.setTimeout(() => {
         if (videoRef.current) {
@@ -214,36 +229,40 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
         <strong>对话</strong>
         <button type="button" className="chat-dock-close" onClick={onClose} aria-label="关闭对话">关闭</button>
       </header>
-      <textarea
-        ref={field}
-        value={text}
-        maxLength={400}
-        placeholder="说点什么..."
-        aria-label="说点什么"
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            send();
-          }
-        }}
-      />
-      {image ? (
-        <div className="chat-attach">
-          <img src={image} alt="待发送的图片" />
-          <button type="button" onClick={() => setImage(null)}>取消图片</button>
-        </div>
-      ) : null}
-      {cameraOn ? (
-        <div className="chat-camera">
-          <video ref={videoRef} muted playsInline autoPlay />
+      <div className="chat-dock-body">
+        <textarea
+          ref={field}
+          value={text}
+          maxLength={400}
+          placeholder="说点什么..."
+          aria-label="说点什么"
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              send();
+            }
+          }}
+        />
+        {image ? (
+          <div className="chat-attach">
+            <img src={image} alt="待发送的图片" />
+            <button type="button" onClick={() => setImage(null)}>取消图片</button>
+          </div>
+        ) : null}
+        {cameraOn ? (
+          <div className="chat-camera-frame">
+            <video ref={videoRef} muted playsInline autoPlay />
+          </div>
+        ) : null}
+      </div>
+      <footer className="chat-dock-foot">
+        {cameraOn ? (
           <div className="chat-camera-actions">
             <button type="button" onClick={shoot}>拍下</button>
             <button type="button" onClick={stopCamera}>取消</button>
           </div>
-        </div>
-      ) : null}
-      <footer className="chat-dock-foot">
+        ) : null}
         <div className="chat-tools">
           <button type="button" className="chat-tool" aria-label="图库" title="图库" onClick={() => fileRef.current?.click()}>
             <GalleryIcon />

@@ -25,8 +25,10 @@ let server: http.Server | null = null;
 let petWin: BrowserWindow | null = null;
 let settingsWin: BrowserWindow | null = null;
 let chatWin: BrowserWindow | null = null;
+let chatPreview = false;
 const CHAT_W = 420;
 const CHAT_H = 300;
+const CHAT_PREVIEW_H = 420;
 let tray: Tray | null = null;
 /** While the context menu is open, window is expanded; content origin stays fixed on screen. */
 let menuChrome: { x: number; y: number; width: number; height: number } | null = null;
@@ -318,7 +320,7 @@ function placeChatWindow(): void {
     figure: live,
     workArea: area,
     menuW: CHAT_W,
-    menuH: CHAT_H,
+    menuH: chatPreview ? Math.min(CHAT_PREVIEW_H, area.height - 16) : CHAT_H,
   });
   const width = Math.max(1, layout.menuW);
   const height = Math.max(1, layout.menuH);
@@ -340,6 +342,7 @@ function openChatWindow(): void {
     chatWin.focus();
     return;
   }
+  chatPreview = false;
   chatWin = new BrowserWindow({
     width: CHAT_W,
     height: CHAT_H,
@@ -538,6 +541,11 @@ function wireIpc(): void {
   ipcMain.on("sakura:open-settings", () => openSettings());
   ipcMain.on("sakura:open-chat", () => openChatWindow());
   ipcMain.on("sakura:close-chat", () => closeChatWindow());
+  ipcMain.on("sakura:chat-preview", (_event, open: unknown) => {
+    if (!chatWin || chatWin.isDestroyed()) return;
+    chatPreview = Boolean(open);
+    placeChatWindow();
+  });
   ipcMain.on("sakura:quit", () => app.quit());
 
   ipcMain.handle("sakura:work-area", (event) => {

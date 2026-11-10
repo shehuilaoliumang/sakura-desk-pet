@@ -17,6 +17,7 @@ export function PetApp() {
   const [reaction, setReaction] = useState(false);
   const [zoomHint, setZoomHint] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatTall, setChatTall] = useState(false);
   const [chatBox, setChatBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [layout, setLayout] = useState<PetLayoutEvent | null>(null);
   const scaleRef = useRef(1);
@@ -53,7 +54,7 @@ export function PetApp() {
       if (!stage) return;
       const gap = 16;
       const wantW = 420;
-      const wantH = 300;
+      const wantH = chatTall ? 440 : 300;
       const roomRight = window.innerWidth - stage.right - gap;
       const roomLeft = stage.left - gap;
       const height = Math.min(wantH, Math.max(220, window.innerHeight - 24));
@@ -88,7 +89,7 @@ export function PetApp() {
     place();
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
-  }, [chatOpen, activeForm, settings?.window.scale]);
+  }, [chatOpen, chatTall, activeForm, settings?.window.scale]);
 
   useEffect(() => {
     if (!chatOpen || window.sakuraPet?.openChat) return;
@@ -413,7 +414,10 @@ export function PetApp() {
 
       {chatOpen && !window.sakuraPet?.openChat && chatBox ? (
         <div className="chat-dock-slot" style={{ left: chatBox.left, top: chatBox.top, width: chatBox.width, height: chatBox.height }}>
-          <ChatPanel onClose={() => setChatOpen(false)} />
+          <ChatPanel
+            onClose={() => { setChatOpen(false); setChatTall(false); }}
+            onPreview={setChatTall}
+          />
         </div>
       ) : null}
       {zoomHint != null ? <div className="zoom-hint" data-no-drag data-hit>{zoomHint}%</div> : null}

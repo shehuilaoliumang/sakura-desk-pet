@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld("sakuraPet", {
   closeChat() {
     ipcRenderer.send("sakura:close-chat");
   },
+  setChatPreview(open: boolean) {
+    ipcRenderer.send("sakura:chat-preview", !!open);
+  },
   quit() {
     ipcRenderer.send("sakura:quit");
   },
