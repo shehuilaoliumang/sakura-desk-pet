@@ -130,10 +130,9 @@ export function SettingsApp() {
   const chooseForm = (id: FormId) => {
     setDraft((current) => (current ? { ...current, activeForm: id } : current));
     void postForm(id).then((result) => {
-      if (!result.ok) {
-        setSaveState("error");
-        setSaveError(result.reason === "form-disabled" ? "这个槽位还没启用" : result.reason ?? "没有切换");
-      }
+      if (result.ok || result.reason === "unreachable") return;
+      setSaveState("error");
+      setSaveError(result.reason === "form-disabled" ? "这个槽位还没启用" : result.reason ?? "没有切换");
     });
   };
 
@@ -576,7 +575,7 @@ export function SettingsApp() {
               />
             </label>
             <p className="hint">
-              把 <code>idle.webm</code>、<code>thinking.gif</code> 这类文件放进 <code>animations/&lt;形态&gt;/</code>，文件名用六个状态名。没有文件时用内置矢量。
+              把 <code>idle.webm</code>、<code>thinking.gif</code> 这类文件放进 <code>animations/&lt;形态&gt;/</code>，文件名用六个状态名。喜怒哀乐放在同形态的 <code>angry</code>、<code>sad</code>、<code>joyful</code> 目录，喜沿用原来的 <code>click</code>。没有文件时用内置矢量。点立绘不改工作状态。
             </p>
             <div className="row-actions">
               <button type="button" onClick={() => void reloadPack()}>重新扫描</button>

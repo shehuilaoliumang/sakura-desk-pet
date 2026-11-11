@@ -40,12 +40,19 @@ export async function putWindowScale(scale: number): Promise<ConfigResponse | { 
   return response.json() as Promise<ConfigResponse | { ok: false; reason?: string; issues?: string[] }>;
 }
 export async function postForm(form: FormId): Promise<{ ok: boolean; activeForm?: FormId; reason?: string }> {
-  const response = await fetch("/pet/form", {
-    method: "POST",
-    headers: userHeaders,
-    body: JSON.stringify({ form }),
-  });
-  return response.json() as Promise<{ ok: boolean; activeForm?: FormId; reason?: string }>;
+  try {
+    const response = await fetch("/pet/form", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ form }),
+    });
+    const body = (await response.json().catch(() => null)) as { ok?: boolean; activeForm?: FormId; reason?: string } | null;
+    if (!response.ok || !body || body.ok === false) return { ok: false, reason: body?.reason ?? "unreachable" };
+    return { ok: true, activeForm: body.activeForm, reason: body.reason };
+  } catch {
+    // The pet window often resizes on this same switch and cancels the response.
+    return { ok: false, reason: "unreachable" };
+  }
 }
 
 export async function postReset(): Promise<ConfigResponse | { ok: false; reason?: string }> {

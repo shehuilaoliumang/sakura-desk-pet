@@ -6,7 +6,7 @@ import { isAdapterId, isFormId, type AdapterId, type FormId, type PetEvent, type
 import { APP_NAME, APP_VERSION, INSPIRATION_URL, PET_ID } from "../shared/version";
 
 const PREFIXES = ["/dsh-pet-7340", "/pet"];
-const MEDIA_RE = /^\/media\/(normal|dark|duo|form4|form5)\/((?:idle|thinking|working|waiting|success|error|click)(?:\/[A-Za-z0-9_-]+)?\.(?:webm|gif|png|webp|mov))$/;
+const MEDIA_RE = /^\/media\/(normal|dark|duo|form4|form5)\/([a-z0-9-]+(?:\/[A-Za-z0-9_-]+)?\.(?:webm|gif|png|webp|mov))$/;
 
 const CORS: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -364,7 +364,7 @@ function resolveDuration(body: Record<string, unknown>): number {
 }
 
 function mediaUrlAllowed(url: string, port: number): boolean {
-  const pathOnly = /^\/pet\/media\/(normal|dark|duo|form4|form5)\/(?:idle|thinking|working|waiting|success|error|click)(?:\/[A-Za-z0-9_-]+)?\.(?:webm|gif|png|webp|mov)$/;
+  const pathOnly = /^\/pet\/media\/(normal|dark|duo|form4|form5)\/[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)?\.(?:webm|gif|png|webp|mov)$/;
   if (url.startsWith("/pet/media/")) return pathOnly.test(url);
   try {
     const parsed = new URL(url);
