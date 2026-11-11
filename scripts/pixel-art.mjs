@@ -13,54 +13,59 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outRoot = path.join(root, "packs", "pixel-q", "animations");
 
-const W = 120;
-const H = 200;
-const OX = 60;
-const FEET = 188;
-const SPAN = 168;
+const W = 180;
+const H = 300;
+const OX = 90;
+const FEET = 272;
+const SPAN = 230;
+/** Both duo figures use this exact scale so neither reads as the taller one. */
+const DUO_SCALE = 0.72;
 
 const COL = {
-  skin: [243, 201, 184, 255],
-  skinShade: [226, 170, 150, 255],
-  blush: [240, 150, 160, 255],
-  hairHi: [244, 236, 252, 255],
-  hair: [186, 150, 214, 255],
-  hairMid: [142, 104, 180, 255],
-  hairDark: [92, 64, 132, 255],
+  skin: [255, 226, 216, 255],
+  skinHi: [255, 244, 238, 255],
+  skinShade: [236, 186, 176, 255],
+  blush: [255, 168, 180, 255],
+  blushDeep: [240, 130, 150, 255],
+  hairHi: [244, 232, 255, 255],
+  hair: [186, 146, 220, 255],
+  hairMid: [146, 102, 190, 255],
+  hairDark: [102, 66, 146, 255],
+  hairEdge: [72, 46, 110, 255],
   whiteHair: [255, 255, 255, 255],
-  whiteMid: [228, 224, 232, 255],
-  whiteDark: [184, 178, 190, 255],
-  shirt: [255, 253, 250, 255],
-  shirtShade: [214, 220, 230, 255],
-  vest: [230, 196, 154, 255],
-  vestDark: [196, 150, 104, 255],
-  vestDeep: [138, 98, 60, 255],
-  bow: [224, 40, 52, 255],
-  bowDeep: [150, 20, 32, 255],
-  bowHi: [255, 150, 150, 255],
-  skirt: [44, 50, 74, 255],
-  skirtDark: [28, 32, 50, 255],
-  sock: [255, 252, 248, 255],
-  shoe: [92, 58, 42, 255],
-  shoeDark: [58, 36, 26, 255],
-  apple: [226, 48, 58, 255],
-  appleHi: [255, 176, 168, 255],
-  appleDark: [140, 20, 32, 255],
-  leaf: [62, 140, 70, 255],
-  stem: [110, 70, 40, 255],
-  eye: [122, 86, 168, 255],
-  eyeDark: [42, 24, 64, 255],
+  whiteMid: [214, 208, 222, 255],
+  whiteDark: [168, 160, 178, 255],
+  whiteEdge: [124, 116, 136, 255],
+  shirt: [255, 252, 250, 255],
+  shirtShade: [214, 220, 232, 255],
+  vest: [236, 196, 150, 255],
+  vestHi: [255, 224, 186, 255],
+  vestDark: [196, 146, 102, 255],
+  vestDeep: [140, 96, 64, 255],
+  bow: [214, 36, 52, 255],
+  bowDeep: [140, 18, 36, 255],
+  bowHi: [255, 150, 156, 255],
+  skirt: [92, 62, 78, 255],
+  skirtMid: [72, 46, 60, 255],
+  skirtDark: [48, 30, 42, 255],
+  sock: [255, 250, 246, 255],
+  shoe: [122, 72, 52, 255],
+  shoeDark: [78, 44, 34, 255],
+  apple: [226, 42, 54, 255],
+  appleHi: [255, 186, 176, 255],
+  appleDark: [150, 18, 36, 255],
+  leaf: [72, 158, 78, 255],
+  stem: [120, 74, 42, 255],
   eyeWhite: [255, 255, 255, 255],
-  redEye: [224, 40, 52, 255],
-  redEyeDark: [110, 12, 24, 255],
-  dress: [22, 16, 22, 255],
-  dressMid: [40, 30, 36, 255],
-  line: [208, 32, 48, 255],
-  boot: [16, 12, 16, 255],
-  ink: [42, 28, 36, 255],
-  shadow: [40, 16, 24, 80],
-  ribbonDark: [28, 14, 20, 220],
-  mouth: [168, 92, 96, 255],
+  pupil: [42, 22, 40, 255],
+  dress: [28, 18, 26, 255],
+  dressMid: [48, 30, 40, 255],
+  dressHi: [72, 46, 58, 255],
+  line: [196, 32, 48, 255],
+  boot: [18, 12, 18, 255],
+  ink: [58, 36, 48, 255],
+  mouth: [186, 96, 108, 255],
+  ribbonDark: [36, 16, 24, 230],
 };
 
 function crc32(buf) {
@@ -216,11 +221,11 @@ function sample(src, x, y) {
 
 function blitCharacter(src, dest, anchor, pose) {
   const scale = anchor.scale;
-  const pad = 8 + Math.abs(pose.lean) + Math.abs(pose.dy) + 24;
-  const minX = Math.floor(anchor.x - 70 * scale - pad);
-  const maxX = Math.ceil(anchor.x + 70 * scale + pad);
-  const minY = Math.floor(anchor.feetY - 200 * scale - pad);
-  const maxY = Math.ceil(anchor.feetY + 16 * scale);
+  const pad = 12 + Math.abs(pose.lean) + Math.abs(pose.dy) + 28;
+  const minX = Math.floor(anchor.x - 110 * scale - pad);
+  const maxX = Math.ceil(anchor.x + 110 * scale + pad);
+  const minY = Math.floor(anchor.feetY - (FEET + 30) * scale - pad);
+  const maxY = Math.ceil(anchor.feetY + 18 * scale);
   for (let dy = minY; dy <= maxY; dy++) {
     for (let dx = minX; dx <= maxX; dx++) {
       const lx = OX + (dx - anchor.x) / scale;
@@ -234,256 +239,356 @@ function blitCharacter(src, dest, anchor, pose) {
   }
 }
 
-function face(pix, kind, pose) {
-  const cx = OX;
-  const cy = 70;
-  const iris = kind === "dark" ? COL.redEye : COL.eye;
-  const pupil = kind === "dark" ? COL.redEyeDark : COL.eyeDark;
-  const blink = pose.blink || pose.expr === "joy";
-  const left = cx - 12;
-  const right = cx + 12;
-  const eyeY = cy + 4;
-  if (blink || pose.expr === "happy") {
-    for (const ex of [left, right]) {
-      plot(pix, ex - 2, eyeY - 1, iris);
-      plot(pix, ex - 1, eyeY - 2, iris);
-      plot(pix, ex, eyeY - 2, iris);
-      plot(pix, ex + 1, eyeY - 2, iris);
-      plot(pix, ex + 2, eyeY - 1, iris);
-      plot(pix, ex - 1, eyeY - 1, iris);
-      plot(pix, ex, eyeY - 1, iris);
-      plot(pix, ex + 1, eyeY - 1, iris);
-    }
-  } else {
-    for (const ex of [left, right]) {
-      fillEllipse(pix, ex, eyeY, pose.expr === "angry" ? 3.2 : 4.2, pose.expr === "sad" ? 4.6 : 5.2, COL.eyeWhite);
-      fillEllipse(pix, ex + (pose.expr === "sad" ? 0.4 : 0), eyeY + 0.6, 2.5, 3.1, iris);
-      fillEllipse(pix, ex + 0.2, eyeY + 1.1, 1.3, 1.8, pupil);
-      plot(pix, ex - 1, eyeY - 1, COL.eyeWhite);
-    }
-  }
-  if (pose.expr === "angry") {
-    stroke(pix, left - 4, eyeY - 8, left + 4, eyeY - 5, 0.8, COL.ink);
-    stroke(pix, right + 4, eyeY - 8, right - 4, eyeY - 5, 0.8, COL.ink);
-  } else if (pose.expr === "sad") {
-    stroke(pix, left - 4, eyeY - 5, left + 4, eyeY - 8, 0.8, COL.ink);
-    stroke(pix, right + 4, eyeY - 5, right - 4, eyeY - 8, 0.8, COL.ink);
-    plot(pix, left - 6, eyeY + 6, [120, 170, 220, 255]);
-    plot(pix, left - 6, eyeY + 7, [120, 170, 220, 255]);
-  }
-  const mouthY = cy + 14;
-  if (pose.expr === "joy") {
-    fillEllipse(pix, cx, mouthY, 4.2, 3.2, [168, 64, 72, 255]);
-    fillRect(pix, cx - 3, mouthY - 2, 7, 2, COL.skin);
-  } else if (pose.expr === "happy") {
-    stroke(pix, cx - 3, mouthY - 1, cx, mouthY + 1, 0.7, COL.mouth);
-    stroke(pix, cx, mouthY + 1, cx + 3, mouthY - 1, 0.7, COL.mouth);
-  } else if (pose.expr === "angry" || pose.expr === "sad") {
-    stroke(pix, cx - 3, mouthY + 1, cx, mouthY - 1, 0.7, COL.mouth);
-    stroke(pix, cx, mouthY - 1, cx + 3, mouthY + 1, 0.7, COL.mouth);
-  } else {
-    fillRect(pix, cx - 2, mouthY, 5, 1, COL.mouth);
-  }
-  const blush = pose.expr === "joy" || pose.expr === "happy" ? 3.4 : 2.4;
-  fillEllipse(pix, cx - 16, cy + 10, blush, 2.1, COL.blush);
-  fillEllipse(pix, cx + 16, cy + 10, blush, 2.1, COL.blush);
+function hairOf(kind) {
+  return kind === "dark"
+    ? { hi: COL.whiteHair, mid: COL.whiteMid, dark: COL.whiteDark, edge: COL.whiteEdge }
+    : { hi: COL.hairHi, mid: COL.hair, dark: COL.hairMid, edge: COL.hairEdge };
 }
 
-function ribbon(pix, kind, pose) {
-  const color = COL.bow;
-  const deep = COL.bowDeep;
-  const hi = COL.bowHi;
-  const x = OX + 24 + pose.ribbon * 2;
-  const y = 52;
-  fillEllipse(pix, x - 5, y, 7, 5, color);
-  fillEllipse(pix, x + 6, y + 1, 6, 4.5, color);
-  fillEllipse(pix, x, y + 1, 2.4, 2.4, deep);
-  plot(pix, x - 6, y - 2, hi);
-  const tail = pose.ribbon * 12;
-  stroke(pix, x - 1, y + 3, x - 4 + tail, y + 24, 1.6, color);
-  stroke(pix, x + 2, y + 3, x + 8 + tail, y + 28, 1.5, deep);
-  if (kind === "dark") {
-    stroke(pix, x + 8 + tail, y + 28, x + 16 + tail * 0.6, y + 40, 1.3, deep);
-  }
+function lock(pix, topX, topY, botX, botY, halfTop, halfBot, color) {
+  fillPoly(pix, [
+    [topX - halfTop, topY],
+    [topX + halfTop, topY],
+    [botX + halfBot, botY],
+    [botX - halfBot, botY],
+  ], color);
 }
 
-function arms(pix, kind, pose) {
-  const sleeve = kind === "dark" ? COL.dress : COL.shirt;
-  const shade = kind === "dark" ? COL.dressMid : COL.shirtShade;
-  const y0 = 108;
-  const left = OX - 18;
-  const right = OX + 18;
-  const mode = pose.arm;
-  const ends = {
-    hold: [[OX - 16, 142], [OX + 16, 142]],
-    offer: [[OX - 14, 150], [OX + 14, 150]],
-    up: [[OX - 28, 78], [OX + 28, 74]],
-    out: [[OX - 40, 116], [OX + 40, 112]],
-    down: [[OX - 14, 150], [OX + 14, 152]],
-    chest: [[OX - 8, 124], [OX + 6, 118]],
-  }[mode] ?? [[OX - 16, 142], [OX + 16, 142]];
-  stroke(pix, left, y0, ends[0][0], ends[0][1], 4.2, shade);
-  stroke(pix, left, y0, ends[0][0], ends[0][1], 3.1, sleeve);
-  stroke(pix, right, y0, ends[1][0], ends[1][1], 4.2, shade);
-  stroke(pix, right, y0, ends[1][0], ends[1][1], 3.1, sleeve);
-  fillEllipse(pix, ends[0][0], ends[0][1], 4.2, 3.6, COL.skin);
-  fillEllipse(pix, ends[1][0], ends[1][1], 4.2, 3.6, COL.skinShade);
-  if (kind === "dark" && mode === "chest") {
-    stroke(pix, ends[1][0] - 4, ends[1][1], ends[1][0] + 5, ends[1][1] + 1, 0.9, COL.line);
-  }
+function bendArm(pix, ax, ay, bx, by, cx, cy, sleeve, shade) {
+  stroke(pix, ax, ay, bx, by, 6.2, shade);
+  stroke(pix, ax, ay, bx, by, 4.6, sleeve);
+  stroke(pix, bx, by, cx, cy, 5.4, shade);
+  stroke(pix, bx, by, cx, cy, 3.8, sleeve);
+  fillEllipse(pix, cx, cy, 5.4, 4.4, COL.skin);
+  fillEllipse(pix, cx - 3.2, cy - 2.2, 1.7, 1.5, COL.skinHi);
+  fillEllipse(pix, cx + 0.2, cy - 3, 1.6, 1.4, COL.skin);
+  fillEllipse(pix, cx + 3.2, cy - 1.6, 1.5, 1.3, COL.skinShade);
+}
+
+function armEnds(pose) {
+  const s = OX;
+  if (pose.arm === "up") return { l: [s - 34, 96], r: [s + 36, 90], le: [s - 28, 124], re: [s + 30, 120] };
+  if (pose.arm === "out") return { l: [s - 52, 168], r: [s + 52, 164], le: [s - 30, 156], re: [s + 30, 154] };
+  if (pose.arm === "down") return { l: [s - 22, 230], r: [s + 22, 232], le: [s - 20, 190], re: [s + 20, 192] };
+  if (pose.arm === "chest") return { l: [s - 6, 198], r: [s + 8, 192], le: [s - 18, 176], re: [s + 16, 174] };
+  if (pose.arm === "offer") return { l: [s - 16, 222], r: [s + 16, 222], le: [s - 22, 186], re: [s + 22, 186] };
+  return { l: [s - 18, 214], r: [s + 18, 214], le: [s - 24, 180], re: [s + 24, 180] };
 }
 
 function appleAt(pix, x, y, big) {
-  const rx = big ? 9 : 7.4;
-  const ry = big ? 8 : 6.6;
-  fillEllipse(pix, x, y, rx + 0.6, ry + 0.4, COL.appleDark);
-  fillEllipse(pix, x - 0.4, y - 0.5, rx, ry, COL.apple);
-  fillEllipse(pix, x - 2.6, y - 2.2, 2.3, 1.6, COL.appleHi);
-  fillRect(pix, x - 0.5, y - ry - 3, 1.6, 4, COL.stem);
-  fillEllipse(pix, x + 3.2, y - ry - 1, 3.4, 1.8, COL.leaf);
+  const rx = big ? 13 : 11;
+  const ry = big ? 12 : 10;
+  fillEllipse(pix, x + 1, y + 1, rx + 0.6, ry, COL.appleDark);
+  fillEllipse(pix, x, y, rx, ry, COL.apple);
+  fillEllipse(pix, x - 3, y - 3, 4.2, 3.2, COL.appleHi);
+  fillEllipse(pix, x + 4, y + 3, 3, 2.2, COL.appleDark);
+  fillRect(pix, x - 0.6, y - ry - 4, 2, 5, COL.stem);
+  fillEllipse(pix, x + 5, y - ry - 1, 4.2, 2.2, COL.leaf);
+  fillEllipse(pix, x + 6, y - ry + 1, 2, 1.2, [120, 200, 110, 255]);
 }
 
-function drawBody(pix, kind, pose) {
-  const hair = kind === "dark"
-    ? { hi: COL.whiteHair, mid: COL.whiteMid, dark: COL.whiteDark }
-    : { hi: COL.hairHi, mid: COL.hair, dark: COL.hairMid };
-  const lock = pose.hair * 7;
-  const skirt = pose.skirt * 8;
+function drawEye(pix, x, y, kind, pose) {
+  const iris = kind === "dark" ? [214, 42, 58, 255] : [154, 96, 204, 255];
+  const irisHi = kind === "dark" ? [255, 150, 156, 255] : [214, 176, 240, 255];
+  const irisDeep = kind === "dark" ? [120, 16, 32, 255] : [96, 48, 150, 255];
+  if (pose.blink) {
+    stroke(pix, x - 7, y + 1, x - 2, y - 2, 1.1, irisDeep);
+    stroke(pix, x - 2, y - 2, x + 3, y - 2, 1.1, iris);
+    stroke(pix, x + 3, y - 2, x + 8, y + 1, 1.1, irisDeep);
+    return;
+  }
+  const squint = pose.expr === "angry" ? 0.72 : pose.expr === "sad" ? 1.05 : 1;
+  fillEllipse(pix, x, y, 8.2, 9.2 * squint, COL.eyeWhite);
+  fillEllipse(pix, x, y + 1.2, 5.4, 6.2 * squint, irisDeep);
+  fillEllipse(pix, x - 0.2, y + 0.4, 4.8, 5.4 * squint, iris);
+  fillEllipse(pix, x - 0.6, y - 1.6, 3.1, 2.4 * squint, irisHi);
+  fillEllipse(pix, x + 0.4, y + 1.6, 2.2, 2.8 * squint, COL.pupil);
+  fillRect(pix, x - 3.2, y - 3.2, 3, 3, COL.eyeWhite);
+  plot(pix, x + 2.2, y + 2.4, COL.eyeWhite);
+  plot(pix, x + 3.2, y + 2.4, COL.eyeWhite);
+  stroke(pix, x - 8, y - 7, x + 7, y - 8, 0.9, COL.ink);
+  if (pose.expr === "sad") {
+    plot(pix, x - 7, y + 8, [140, 186, 230, 255]);
+    plot(pix, x - 7, y + 9, [140, 186, 230, 255]);
+    plot(pix, x - 6, y + 10, [186, 214, 240, 255]);
+  }
+}
+
+function drawFace(pix, kind, pose) {
+  const y = 118;
+  fillEllipse(pix, OX + 1, y + 2, 27, 25, COL.skinShade);
+  fillEllipse(pix, OX - 1, y, 26, 24, COL.skin);
+  fillEllipse(pix, OX - 8, y - 8, 10, 8, COL.skinHi);
+  const blinkJoy = pose.expr === "joy" && pose.blink;
+  if (pose.expr === "joy" && !pose.blink) {
+    drawEye(pix, OX - 12, y - 2, kind, pose);
+    drawEye(pix, OX + 13, y - 2, kind, pose);
+  } else if (blinkJoy || (pose.expr === "happy" && pose.blink)) {
+    drawEye(pix, OX - 12, y - 2, kind, { ...pose, blink: true });
+    drawEye(pix, OX + 13, y - 2, kind, { ...pose, blink: true });
+  } else {
+    drawEye(pix, OX - 12, y - 2, kind, pose);
+    drawEye(pix, OX + 13, y - 2, kind, pose);
+  }
+  if (pose.expr === "angry") {
+    stroke(pix, OX - 20, y - 16, OX - 6, y - 12, 1.1, COL.ink);
+    stroke(pix, OX + 20, y - 16, OX + 6, y - 12, 1.1, COL.ink);
+  } else if (pose.expr === "sad") {
+    stroke(pix, OX - 20, y - 12, OX - 6, y - 16, 1.1, COL.ink);
+    stroke(pix, OX + 20, y - 12, OX + 6, y - 16, 1.1, COL.ink);
+  } else {
+    stroke(pix, OX - 18, y - 14, OX - 8, y - 15, 0.8, COL.hairEdge);
+    stroke(pix, OX + 18, y - 14, OX + 8, y - 15, 0.8, COL.hairEdge);
+  }
+  const mouthY = y + 14;
+  if (pose.expr === "joy") {
+    fillEllipse(pix, OX, mouthY + 1, 5, 3.6, [176, 72, 84, 255]);
+    fillEllipse(pix, OX, mouthY - 1, 4.2, 1.6, COL.skin);
+    fillEllipse(pix, OX - 1, mouthY, 1.4, 1, [255, 180, 180, 255]);
+  } else if (pose.expr === "happy") {
+    stroke(pix, OX - 5, mouthY - 1, OX, mouthY + 2, 1.05, COL.mouth);
+    stroke(pix, OX, mouthY + 2, OX + 5, mouthY - 1, 1.05, COL.mouth);
+  } else if (pose.expr === "angry" || pose.expr === "sad") {
+    stroke(pix, OX - 4, mouthY + 2, OX, mouthY, 0.95, COL.mouth);
+    stroke(pix, OX, mouthY, OX + 4, mouthY + 2, 0.95, COL.mouth);
+  } else {
+    stroke(pix, OX - 3, mouthY, OX + 3, mouthY + 1, 0.9, COL.mouth);
+  }
+  const blush = pose.expr === "joy" || pose.expr === "happy" ? 4.2 : 3.2;
+  fillEllipse(pix, OX - 18, y + 8, blush, 2.3, COL.blush);
+  fillEllipse(pix, OX + 18, y + 8, blush, 2.3, COL.blush);
+  if (pose.expr === "joy") {
+    fillEllipse(pix, OX - 18, y + 8, 2, 1.2, COL.blushDeep);
+    fillEllipse(pix, OX + 18, y + 8, 2, 1.2, COL.blushDeep);
+  }
+}
+
+function hairRibbon(pix, kind, pose) {
+  const sway = pose.ribbon * 14;
+  const x = OX + 30 + pose.ribbon * 2;
+  const y = 78;
+  fillEllipse(pix, x - 8, y, 9, 6.5, COL.bowDeep);
+  fillEllipse(pix, x - 9, y - 1, 7.5, 5, COL.bow);
+  fillEllipse(pix, x + 8, y + 1, 8, 5.5, COL.bowDeep);
+  fillEllipse(pix, x + 7, y, 6.5, 4.4, COL.bow);
+  fillEllipse(pix, x, y + 1, 3, 3, COL.bowDeep);
+  plot(pix, x - 11, y - 3, COL.bowHi);
+  plot(pix, x - 10, y - 2, COL.bowHi);
+  plot(pix, x + 5, y - 2, COL.bowHi);
+  stroke(pix, x - 1, y + 4, x - 6 + sway, y + 28, 2.1, COL.bow);
+  stroke(pix, x - 1, y + 4, x - 6 + sway, y + 28, 1.1, COL.bowHi);
+  stroke(pix, x + 2, y + 4, x + 10 + sway * 0.8, y + 34, 1.8, COL.bowDeep);
+  if (kind === "dark") stroke(pix, x + 10 + sway * 0.8, y + 34, x + 18 + sway * 0.4, y + 52, 1.4, COL.bow);
+}
+
+function bangs(pix, hair, pose) {
+  const tips = [-22, -12, -2, 8, 18];
+  tips.forEach((dx, index) => {
+    const drop = 16 + (index % 2) * 6;
+    const sway = pose.hair * 3;
+    const color = index % 2 ? hair.dark : hair.mid;
+    fillPoly(pix, [
+      [OX + dx - 6, 86],
+      [OX + dx + 6, 86],
+      [OX + dx + sway, 86 + drop],
+    ], color);
+    fillPoly(pix, [
+      [OX + dx - 3, 86],
+      [OX + dx + 1, 84],
+      [OX + dx + sway * 0.5, 86 + drop - 4],
+    ], hair.hi);
+  });
+}
+
+function drawBody(pix, kind, pose, options = {}) {
+  const hair = hairOf(kind);
+  const sway = pose.hair * 12;
+  const hem = pose.skirt * 14;
+  const long = kind === "dark";
+  const showApple = options.apple !== false && kind === "normal" && pose.arm !== "out";
 
   withGroup(pix, "hair", () => {
-    fillEllipse(pix, OX, 66, 34, 32, hair.dark);
-    fillEllipse(pix, OX - 2, 62, 30, 28, hair.mid);
-    fillEllipse(pix, OX - 8, 54, 14, 10, hair.hi);
-    fillPoly(pix, [[OX - 28, 74], [OX - 16, 70], [OX - 22 + lock, kind === "dark" ? 168 : 132], [OX - 34 + lock, kind === "dark" ? 160 : 124]], hair.mid);
-    fillPoly(pix, [[OX + 16, 70], [OX + 30, 76], [OX + 36 + lock, kind === "dark" ? 164 : 128], [OX + 18 + lock, kind === "dark" ? 170 : 136]], hair.dark);
-    if (kind === "dark") {
-      fillPoly(pix, [[OX - 8, 80], [OX + 6, 78], [OX + 2 + lock * 0.4, 176], [OX - 12 + lock * 0.3, 170]], hair.mid);
-    }
+    fillEllipse(pix, OX, 108, 40, 36, hair.edge);
+    fillEllipse(pix, OX - 2, 102, 36, 32, hair.dark);
+    fillEllipse(pix, OX - 6, 92, 22, 16, hair.mid);
+    fillEllipse(pix, OX - 14, 84, 12, 8, hair.hi);
+    const reach = long ? 236 : 186;
+    lock(pix, OX - 30, 100, OX - 38 + sway, reach, 10, 6, hair.dark);
+    lock(pix, OX - 24, 108, OX - 28 + sway * 0.7, reach - 16, 7, 4, hair.mid);
+    lock(pix, OX - 20, 112, OX - 18 + sway * 0.4, reach - 36, 4, 2, hair.hi);
+    lock(pix, OX + 28, 102, OX + 40 + sway, long ? 246 : 196, 11, 7, hair.edge);
+    lock(pix, OX + 22, 110, OX + 30 + sway * 0.6, long ? 220 : 176, 7, 4, hair.dark);
+    lock(pix, OX + 16, 114, OX + 18 + sway * 0.3, long ? 200 : 164, 4, 2.4, hair.hi);
+    if (long) lock(pix, OX - 4, 120, OX + sway * 0.3, 250, 6, 4, hair.mid);
   });
 
   withGroup(pix, "legs", () => {
     if (kind === "dark") {
-      fillRect(pix, OX - 12, 150, 9, 28, COL.dress);
-      fillRect(pix, OX + 3, 150, 9, 28, COL.dressMid);
-      fillEllipse(pix, OX - 8, 180, 8, 4.5, COL.boot);
-      fillEllipse(pix, OX + 8, 180, 8, 4.5, COL.boot);
-      fillRect(pix, OX - 14, 176, 12, 2, COL.line);
-      fillRect(pix, OX + 2, 176, 12, 2, COL.line);
+      fillRect(pix, OX - 14, 236, 12, 28, COL.dress);
+      fillRect(pix, OX + 2, 236, 12, 28, COL.dressMid);
+      fillEllipse(pix, OX - 10, 266, 11, 5.5, COL.boot);
+      fillEllipse(pix, OX + 10, 266, 11, 5.5, COL.boot);
+      fillRect(pix, OX - 18, 262, 16, 2, COL.line);
+      fillRect(pix, OX + 2, 262, 16, 2, COL.line);
     } else {
-      fillRect(pix, OX - 11, 156, 8, 16, COL.skinShade);
-      fillRect(pix, OX + 3, 156, 8, 16, COL.skin);
-      fillRect(pix, OX - 12, 168, 9, 6, COL.sock);
-      fillRect(pix, OX + 3, 168, 9, 6, COL.sock);
-      fillEllipse(pix, OX - 8, 180, 8, 4.6, COL.shoe);
-      fillEllipse(pix, OX + 8, 180, 8, 4.6, COL.shoeDark);
+      fillRect(pix, OX - 12, 240, 10, 16, COL.skinShade);
+      fillRect(pix, OX + 3, 240, 10, 16, COL.skin);
+      fillRect(pix, OX - 13, 252, 12, 10, COL.sock);
+      fillRect(pix, OX + 2, 252, 12, 10, COL.sock);
+      fillRect(pix, OX - 13, 252, 12, 2, COL.shirtShade);
+      fillRect(pix, OX + 2, 252, 12, 2, COL.shirtShade);
+      fillEllipse(pix, OX - 9, 266, 11, 5.6, COL.shoe);
+      fillEllipse(pix, OX + 10, 266, 11, 5.6, COL.shoeDark);
+      stroke(pix, OX - 14, 262, OX - 4, 262, 0.8, COL.shoeDark);
     }
   });
 
   withGroup(pix, "skirt", () => {
     if (kind === "dark") {
       fillPoly(pix, [
-        [OX - 16, 124],
-        [OX + 16, 124],
-        [OX + 28 + skirt, 172],
-        [OX - 28 + skirt, 172],
+        [OX - 22, 206],
+        [OX + 22, 206],
+        [OX + 40 + hem, 258],
+        [OX - 40 + hem, 258],
       ], COL.dress);
-      fillPoly(pix, [
-        [OX - 14, 128],
-        [OX + 14, 128],
-        [OX + 22 + skirt, 168],
-        [OX - 22 + skirt, 168],
-      ], COL.dressMid);
-      for (const x of [OX - 10, OX - 2, OX + 6, OX + 14]) {
-        stroke(pix, x, 128, x + skirt * 0.35, 168, 0.7, COL.line);
+      for (let i = 0; i < 5; i++) {
+        const t0 = i / 5;
+        const t1 = (i + 1) / 5;
+        const color = i % 2 ? COL.dressMid : COL.dressHi;
+        fillPoly(pix, [
+          [OX - 18 + t0 * 36, 210],
+          [OX - 18 + t1 * 36, 210],
+          [OX - 34 + hem + t1 * 68, 254],
+          [OX - 34 + hem + t0 * 68, 254],
+        ], color);
+        stroke(pix, OX - 16 + i * 8, 212, OX - 28 + hem + i * 14, 252, 0.7, COL.line);
       }
-      stroke(pix, OX - 26 + skirt, 170, OX + 26 + skirt, 170, 1.1, COL.line);
+      stroke(pix, OX - 38 + hem, 254, OX + 38 + hem, 254, 1.4, COL.line);
     } else {
       fillPoly(pix, [
-        [OX - 16, 128],
-        [OX + 16, 128],
-        [OX + 26 + skirt, 162],
-        [OX - 26 + skirt, 162],
-      ], COL.skirt);
-      fillPoly(pix, [
-        [OX - 12, 132],
-        [OX + 12, 132],
-        [OX + 18 + skirt, 158],
-        [OX - 18 + skirt, 158],
+        [OX - 20, 208],
+        [OX + 20, 208],
+        [OX + 36 + hem, 252],
+        [OX - 36 + hem, 252],
       ], COL.skirtDark);
+      for (let i = 0; i < 5; i++) {
+        const t0 = i / 5;
+        const t1 = (i + 1) / 5;
+        const color = i % 2 ? COL.skirtMid : COL.skirt;
+        fillPoly(pix, [
+          [OX - 16 + t0 * 32, 210],
+          [OX - 16 + t1 * 32, 210],
+          [OX - 30 + hem + t1 * 60, 248],
+          [OX - 30 + hem + t0 * 60, 248],
+        ], color);
+      }
+      stroke(pix, OX - 34 + hem, 248, OX + 34 + hem, 248, 1.2, COL.skirtDark);
     }
   });
 
-  withGroup(pix, "arms", () => arms(pix, kind, pose));
+  withGroup(pix, "arms", () => {
+    const sleeve = kind === "dark" ? COL.dress : COL.shirt;
+    const shade = kind === "dark" ? COL.dressMid : COL.shirtShade;
+    const ends = armEnds(pose);
+    fillEllipse(pix, OX - 24, 162, 10, 8, shade);
+    fillEllipse(pix, OX + 24, 162, 10, 8, sleeve);
+    bendArm(pix, OX - 22, 164, ends.le[0], ends.le[1], ends.l[0], ends.l[1], sleeve, shade);
+    bendArm(pix, OX + 22, 164, ends.re[0], ends.re[1], ends.r[0], ends.r[1], sleeve, shade);
+  });
 
   withGroup(pix, "torso", () => {
     if (kind === "dark") {
-      fillRect(pix, OX - 14, 96, 28, 36, COL.dress);
-      fillRect(pix, OX - 12, 98, 24, 30, COL.dressMid);
-      stroke(pix, OX, 98, OX, 132, 0.8, COL.line);
-      stroke(pix, OX - 8, 100, OX - 10, 132, 0.7, COL.line);
-      stroke(pix, OX + 8, 100, OX + 10, 132, 0.7, COL.line);
-      fillEllipse(pix, OX, 98, 8, 5, COL.dress);
-    } else {
-      fillRect(pix, OX - 18, 94, 36, 28, COL.shirt);
+      fillEllipse(pix, OX, 156, 16, 10, COL.dress);
       fillPoly(pix, [
-        [OX - 15, 108],
-        [OX + 15, 108],
-        [OX + 20, 150],
-        [OX - 20, 150],
+        [OX - 18, 158],
+        [OX + 18, 158],
+        [OX + 20, 178],
+        [OX + 14, 206],
+        [OX - 14, 206],
+        [OX - 20, 178],
+      ], COL.dress);
+      fillPoly(pix, [
+        [OX + 1, 160],
+        [OX + 16, 162],
+        [OX + 12, 204],
+        [OX + 1, 204],
+      ], COL.dressMid);
+      fillEllipse(pix, OX - 6, 166, 6, 5, COL.dressHi);
+      stroke(pix, OX, 164, OX, 204, 0.9, COL.line);
+      stroke(pix, OX - 8, 168, OX - 10, 202, 0.8, COL.line);
+      stroke(pix, OX + 8, 168, OX + 10, 202, 0.8, COL.line);
+    } else {
+      fillEllipse(pix, OX - 24, 162, 11, 9, COL.shirtShade);
+      fillEllipse(pix, OX + 24, 162, 11, 9, COL.shirt);
+      fillPoly(pix, [
+        [OX - 16, 150],
+        [OX + 16, 150],
+        [OX + 18, 176],
+        [OX - 18, 176],
+      ], COL.shirt);
+      fillPoly(pix, [
+        [OX - 8, 150],
+        [OX + 8, 150],
+        [OX, 172],
+      ], COL.shirtShade);
+      fillPoly(pix, [
+        [OX - 18, 164],
+        [OX + 18, 164],
+        [OX + 22, 184],
+        [OX + 16, 206],
+        [OX + 22, 218],
+        [OX - 22, 218],
+        [OX - 16, 206],
+        [OX - 22, 184],
       ], COL.vest);
       fillPoly(pix, [
-        [OX - 6, 108],
-        [OX + 6, 108],
-        [OX + 4, 146],
-        [OX - 4, 146],
+        [OX + 2, 168],
+        [OX + 16, 168],
+        [OX + 14, 206],
+        [OX + 18, 216],
+        [OX + 2, 216],
+      ], COL.vestDark);
+      fillEllipse(pix, OX - 10, 174, 7, 6, COL.vestHi);
+      fillPoly(pix, [
+        [OX - 7, 164],
+        [OX + 7, 164],
+        [OX, 184],
       ], COL.shirt);
-      for (const y of [122, 132, 142]) fillEllipse(pix, OX - 9, y, 1.3, 1.3, COL.vestDeep);
-      fillPoly(pix, [[OX - 7, 96], [OX + 7, 96], [OX, 108]], COL.shirt);
+      for (const y of [188, 198, 208]) fillEllipse(pix, OX - 7, y, 1.7, 1.7, COL.vestDeep);
     }
   });
 
   withGroup(pix, "bow", () => {
     if (kind === "normal") {
-      fillEllipse(pix, OX - 6, 100, 6, 4, COL.bow);
-      fillEllipse(pix, OX + 6, 100, 6, 4, COL.bow);
-      fillEllipse(pix, OX, 101, 2.2, 2.2, COL.bowDeep);
-      stroke(pix, OX - 2, 103, OX - 5, 114, 1.3, COL.bow);
-      stroke(pix, OX + 2, 103, OX + 5, 114, 1.3, COL.bowDeep);
-      plot(pix, OX - 7, 98, COL.bowHi);
+      fillEllipse(pix, OX - 9, 156, 8, 5, COL.bow);
+      fillEllipse(pix, OX + 9, 156, 8, 5, COL.bowDeep);
+      fillEllipse(pix, OX - 10, 155, 5, 3, COL.bowHi);
+      fillEllipse(pix, OX, 157, 2.6, 2.6, COL.bowDeep);
+      stroke(pix, OX - 2, 160, OX - 7, 176, 1.6, COL.bow);
+      stroke(pix, OX + 2, 160, OX + 7, 176, 1.5, COL.bowDeep);
     }
   });
 
-  if (kind === "normal" && pose.arm !== "out") {
+  if (showApple) {
     const raised = pose.arm === "up";
-    const offered = pose.arm === "offer";
-    const ax = raised ? OX + 22 : OX;
-    const ay = (raised ? 86 : offered ? 142 : 136) + (pose.apple ?? 0);
+    const ax = raised ? OX + 30 : OX;
+    const ay = raised ? 102 : pose.arm === "offer" ? 224 : 214;
+    withGroup(pix, "apple", () => appleAt(pix, ax, ay, raised || pose.arm === "offer"));
     withGroup(pix, "hands", () => {
       if (!raised) {
-        fillEllipse(pix, ax - 9, ay + 2, 4.2, 3.3, COL.skin);
-        fillEllipse(pix, ax + 9, ay + 2, 4.2, 3.3, COL.skinShade);
+        fillEllipse(pix, ax - 12, ay + 2, 5, 3.6, COL.skin);
+        fillEllipse(pix, ax + 12, ay + 2, 5, 3.6, COL.skinShade);
       }
     });
-    withGroup(pix, "apple", () => appleAt(pix, ax, ay, offered || raised));
   }
 
-  withGroup(pix, "face", () => {
-    fillEllipse(pix, OX, 70, 22, 20, COL.skinShade);
-    fillEllipse(pix, OX - 1, 68, 20, 18, COL.skin);
-  });
-  withGroup(pix, "hair", () => {
-    fillEllipse(pix, OX, 52, 24, 14, hair.mid);
-    fillEllipse(pix, OX - 6, 48, 10, 6, hair.hi);
-    fillPoly(pix, [[OX - 16, 54], [OX - 8, 50], [OX - 12, 64], [OX - 18, 62]], hair.dark);
-    fillPoly(pix, [[OX - 2, 50], [OX + 6, 48], [OX + 2, 62], [OX - 6, 60]], hair.mid);
-    fillPoly(pix, [[OX + 8, 50], [OX + 16, 54], [OX + 18, 64], [OX + 8, 60]], hair.dark);
-  });
-  withGroup(pix, "face", () => face(pix, kind, pose));
-  withGroup(pix, "ribbon", () => ribbon(pix, kind, pose));
+  withGroup(pix, "face", () => drawFace(pix, kind, pose));
+  withGroup(pix, "hair", () => bangs(pix, hair, pose));
+  withGroup(pix, "ribbon", () => hairRibbon(pix, kind, pose));
 }
 
 function shadow(pix, x, y, rx, alpha) {
-  fillEllipse(pix, x, y, Math.max(4, rx), 3.2, [40, 16, 24, alpha]);
+  fillEllipse(pix, x, y, Math.max(6, rx), 4.2, [48, 24, 32, alpha]);
 }
 
 function renderSingle(kind, pose) {
@@ -492,49 +597,50 @@ function renderSingle(kind, pose) {
   outline(body);
   const frame = createPix();
   const lift = Math.max(0, -pose.dy);
-  shadow(frame, OX, 192, 16 * pose.sx * (1 - lift / 90), Math.max(16, Math.round(78 * (1 - lift / 70))));
+  shadow(frame, OX, FEET + 8, 22 * pose.sx * (1 - lift / 120), Math.max(18, Math.round(90 * (1 - lift / 80))));
   blitCharacter(body, frame, { x: OX, feetY: FEET, scale: 1 }, pose);
   frame.bounds = body.bounds;
   return frame;
 }
 
-function renderDuo(darkPose, normalPose) {
-  const darkBody = createPix();
-  const normalBody = createPix();
-  drawBody(darkBody, "dark", { ...darkPose, arm: darkPose.arm === "hold" ? "chest" : darkPose.arm });
-  drawBody(normalBody, "normal", normalPose);
-  outline(darkBody);
-  outline(normalBody);
-  const frame = createPix();
-  const ribbonShift = (darkPose.ribbon + normalPose.ribbon) * 8;
-  ribbonSway(frame, 10, 168, 34 + ribbonShift, 146, 58, 178, 3.1, COL.ribbonDark);
-  ribbonSway(frame, 6, 184, 28 + ribbonShift * 0.6, 160, 48, 190, 2.4, [90, 16, 28, 210]);
-  const darkAnchor = { x: 44, feetY: 190, scale: 0.86 };
-  const normalAnchor = { x: 80, feetY: 192, scale: 0.82 };
-  const lift = Math.max(0, -darkPose.dy, -normalPose.dy);
-  shadow(frame, darkAnchor.x, 194, 14 * (1 - lift / 100), Math.max(14, 64 - lift));
-  shadow(frame, normalAnchor.x, 194, 12 * (1 - lift / 100), Math.max(14, 64 - lift));
-  blitCharacter(darkBody, frame, darkAnchor, darkPose);
-  blitCharacter(normalBody, frame, normalAnchor, normalPose);
-  const cheek = project(normalAnchor, normalPose, OX - 16, 84);
-  const shoulder = project(darkAnchor, darkPose, OX + 16, 108);
-  stroke(frame, shoulder.x, shoulder.y, cheek.x, cheek.y, 3.4, COL.dress);
-  stroke(frame, shoulder.x, shoulder.y, cheek.x, cheek.y, 2.2, COL.dressMid);
-  fillEllipse(frame, cheek.x, cheek.y, 4.2, 3.4, COL.skin);
-  const applePt = project(normalAnchor, normalPose, OX + (normalPose.arm === "up" ? 22 : 0), normalPose.arm === "up" ? 86 : normalPose.arm === "offer" ? 142 : 136);
-  fillEllipse(frame, applePt.x - 6, applePt.y - 2, 2.2, 1.8, COL.skinShade);
-  ribbonSway(frame, 70, 186, 96 + ribbonShift * 0.4, 168, 116, 188, 2.2, COL.line);
-  return frame;
-}
-
-function ribbonSway(pix, x0, y0, x1, y1, x2, y2, radius, color) {
-  for (let i = 0; i <= 8; i++) {
-    const t = i / 8;
+function curve(pix, x0, y0, x1, y1, x2, y2, radius, color) {
+  for (let i = 0; i <= 14; i++) {
+    const t = i / 14;
     const u = 1 - t;
     const x = u * u * x0 + 2 * u * t * x1 + t * t * x2;
     const y = u * u * y0 + 2 * u * t * y1 + t * t * y2;
-    fillEllipse(pix, x, y, radius, radius * 0.72, color);
+    fillEllipse(pix, x, y, radius, radius * 0.82, color);
   }
+}
+
+function renderDuo(darkPose, normalPose) {
+  const darkBody = createPix();
+  const normalBody = createPix();
+  const darkArm = darkPose.arm === "up" || darkPose.arm === "out" || darkPose.arm === "down" ? darkPose.arm : "chest";
+  drawBody(darkBody, "dark", { ...darkPose, arm: darkArm }, { apple: false });
+  drawBody(normalBody, "normal", { ...normalPose, arm: normalPose.arm === "out" ? "out" : "hold" }, { apple: false });
+  outline(darkBody);
+  outline(normalBody);
+  const frame = createPix();
+  const darkAnchor = { x: 66, feetY: FEET - 14, scale: DUO_SCALE };
+  const normalAnchor = { x: 116, feetY: FEET - 14, scale: DUO_SCALE };
+  const lift = Math.max(0, -darkPose.dy, -normalPose.dy);
+  shadow(frame, darkAnchor.x, FEET + 10, 16 * (1 - lift / 140), Math.max(16, 70 - lift));
+  shadow(frame, normalAnchor.x, FEET + 10, 16 * (1 - lift / 140), Math.max(16, 70 - lift));
+  blitCharacter(darkBody, frame, darkAnchor, darkPose);
+  blitCharacter(normalBody, frame, normalAnchor, normalPose);
+  const raised = normalPose.arm === "up" || darkPose.arm === "up";
+  const appleLocalY = raised ? 108 : 214;
+  const applePt = project(normalAnchor, normalPose, OX - 8, appleLocalY);
+  const shoulder = project(darkAnchor, darkPose, OX + 20, 164);
+  const cheek = project(normalAnchor, normalPose, OX - 20, 126);
+  curve(frame, shoulder.x, shoulder.y, (shoulder.x + applePt.x) / 2 - 6, (shoulder.y + applePt.y) / 2 - 10, applePt.x - 8, applePt.y, 4.6, COL.dress);
+  curve(frame, shoulder.x, shoulder.y, (shoulder.x + cheek.x) / 2, shoulder.y - 8, cheek.x, cheek.y, 3.4, COL.dressMid);
+  fillEllipse(frame, cheek.x, cheek.y, 4.6, 3.6, COL.skin);
+  fillEllipse(frame, applePt.x - 10, applePt.y + 2, 4.2, 3.2, COL.skinShade);
+  fillEllipse(frame, applePt.x + 10, applePt.y + 2, 4.2, 3.2, COL.skin);
+  appleAt(frame, applePt.x, applePt.y, true);
+  return frame;
 }
 
 function project(anchor, pose, x, y) {
@@ -566,46 +672,46 @@ function pose(partial) {
 
 const IDLE = [
   pose({}),
-  pose({ dy: -8, sy: 1.03, sx: 0.98, lean: 3, ribbon: 0.5, skirt: 0.4, hair: 0.45 }),
-  pose({ dy: -14, sy: 1.05, sx: 0.96, blink: true, ribbon: 1, skirt: 0.8, hair: 0.9 }),
-  pose({ dy: -6, sy: 1.02, sx: 0.99, lean: -2, ribbon: 0.2, skirt: 0.15, hair: 0.1 }),
-  pose({ lean: -2, ribbon: -0.4, skirt: -0.5, hair: -0.45 }),
-  pose({ dy: 6, sy: 0.82, sx: 1.16, ribbon: -0.9, skirt: -1, hair: -0.8 }),
-  pose({ dy: 2, sy: 0.94, sx: 1.06, blink: true, ribbon: -0.2, skirt: -0.15, hair: -0.1 }),
-  pose({ dy: -5, sy: 1.02, sx: 0.98, ribbon: 0.3, skirt: 0.25, hair: 0.3 }),
+  pose({ dy: -12, sy: 1.03, sx: 0.98, lean: 4, ribbon: 0.5, skirt: 0.4, hair: 0.45 }),
+  pose({ dy: -20, sy: 1.05, sx: 0.96, blink: true, ribbon: 1, skirt: 0.8, hair: 0.9 }),
+  pose({ dy: -8, sy: 1.02, sx: 0.99, lean: -3, ribbon: 0.2, skirt: 0.15, hair: 0.1 }),
+  pose({ lean: -3, ribbon: -0.4, skirt: -0.5, hair: -0.45 }),
+  pose({ dy: 8, sy: 0.8, sx: 1.16, ribbon: -0.9, skirt: -1, hair: -0.8 }),
+  pose({ dy: 3, sy: 0.94, sx: 1.06, blink: true, ribbon: -0.2, skirt: -0.15, hair: -0.1 }),
+  pose({ dy: -6, sy: 1.02, sx: 0.98, ribbon: 0.3, skirt: 0.25, hair: 0.3 }),
 ];
 
 const JOY = [
-  pose({ dy: 6, sy: 0.74, sx: 1.24, expr: "joy", arm: "down", ribbon: -0.2, skirt: -0.2 }),
-  pose({ dy: -12, sy: 1.06, sx: 0.94, expr: "joy", arm: "up", ribbon: 0.6, skirt: 0.5, hair: 0.6 }),
-  pose({ dy: -22, sy: 1.04, sx: 0.95, expr: "joy", arm: "up", ribbon: 1, skirt: 1, hair: 1 }),
-  pose({ dy: -20, sy: 1.03, sx: 0.96, expr: "joy", blink: true, arm: "up", ribbon: 0.8, skirt: 0.7, hair: 0.8 }),
-  pose({ dy: -8, sy: 1.02, sx: 0.98, expr: "joy", arm: "up", ribbon: 0.3, skirt: 0.2, hair: 0.2 }),
-  pose({ dy: 8, sy: 0.7, sx: 1.28, expr: "joy", arm: "out", ribbon: -0.4, skirt: -0.6, hair: -0.3 }),
-  pose({ dy: -10, sy: 1.05, sx: 0.96, expr: "joy", arm: "up", ribbon: 0.7, skirt: 0.4, hair: 0.5 }),
-  pose({ dy: -2, sy: 1.02, sx: 0.99, expr: "happy", arm: "up", ribbon: 0.2, skirt: 0.1, hair: 0.15 }),
+  pose({ dy: 10, sy: 0.74, sx: 1.24, expr: "joy", arm: "down", ribbon: -0.2, skirt: -0.2 }),
+  pose({ dy: -18, sy: 1.06, sx: 0.94, expr: "joy", arm: "up", ribbon: 0.6, skirt: 0.5, hair: 0.6 }),
+  pose({ dy: -36, sy: 1.03, sx: 0.95, expr: "joy", arm: "up", ribbon: 1, skirt: 1, hair: 1 }),
+  pose({ dy: -32, sy: 1.03, sx: 0.96, expr: "joy", blink: true, arm: "up", ribbon: 0.8, skirt: 0.7, hair: 0.8 }),
+  pose({ dy: -12, sy: 1.02, sx: 0.98, expr: "joy", arm: "up", ribbon: 0.3, skirt: 0.2, hair: 0.2 }),
+  pose({ dy: 12, sy: 0.7, sx: 1.26, expr: "joy", arm: "out", ribbon: -0.4, skirt: -0.6, hair: -0.3 }),
+  pose({ dy: -16, sy: 1.05, sx: 0.96, expr: "joy", arm: "up", ribbon: 0.7, skirt: 0.4, hair: 0.5 }),
+  pose({ dy: -4, sy: 1.02, sx: 0.99, expr: "happy", arm: "up", ribbon: 0.2, skirt: 0.1, hair: 0.15 }),
 ];
 
 const ANGRY = [
-  pose({ dy: 2, sy: 0.96, sx: 1.04, lean: -16, expr: "angry", arm: "out", ribbon: -1, skirt: -0.9, hair: -1 }),
-  pose({ lean: 18, expr: "angry", arm: "out", ribbon: 1, skirt: 1, hair: 1 }),
-  pose({ dy: 5, sy: 0.86, sx: 1.12, lean: -18, expr: "angry", arm: "out", ribbon: -0.8, skirt: -1, hair: -0.8 }),
-  pose({ dy: -4, sy: 1.03, sx: 0.98, lean: 16, expr: "angry", blink: true, arm: "out", ribbon: 0.7, skirt: 0.5, hair: 0.7 }),
-  pose({ lean: -12, expr: "angry", arm: "out", ribbon: -0.4, skirt: -0.3, hair: -0.4 }),
-  pose({ lean: 14, expr: "angry", arm: "out", ribbon: 0.5, skirt: 0.4, hair: 0.5 }),
-  pose({ dy: 3, sy: 0.9, sx: 1.08, lean: -8, expr: "angry", arm: "out", ribbon: -0.2, skirt: -0.2, hair: -0.15 }),
-  pose({ lean: 5, expr: "angry", arm: "out", ribbon: 0.15, hair: 0.1 }),
+  pose({ dy: 3, sy: 0.96, sx: 1.04, lean: -24, expr: "angry", arm: "out", ribbon: -1, skirt: -0.9, hair: -1 }),
+  pose({ lean: 28, expr: "angry", arm: "out", ribbon: 1, skirt: 1, hair: 1 }),
+  pose({ dy: 8, sy: 0.86, sx: 1.12, lean: -28, expr: "angry", arm: "out", ribbon: -0.8, skirt: -1, hair: -0.8 }),
+  pose({ dy: -6, sy: 1.03, sx: 0.98, lean: 24, expr: "angry", blink: true, arm: "out", ribbon: 0.7, skirt: 0.5, hair: 0.7 }),
+  pose({ lean: -18, expr: "angry", arm: "out", ribbon: -0.4, skirt: -0.3, hair: -0.4 }),
+  pose({ lean: 20, expr: "angry", arm: "out", ribbon: 0.5, skirt: 0.4, hair: 0.5 }),
+  pose({ dy: 4, sy: 0.9, sx: 1.08, lean: -12, expr: "angry", arm: "out", ribbon: -0.2, skirt: -0.2, hair: -0.15 }),
+  pose({ lean: 8, expr: "angry", arm: "out", ribbon: 0.15, hair: 0.1 }),
 ];
 
 const SAD = [
-  pose({ dy: 2, sy: 0.98, expr: "sad", arm: "down", ribbon: -0.1 }),
-  pose({ dy: 6, sy: 0.92, sx: 1.04, lean: -3, expr: "sad", arm: "down", ribbon: -0.3, skirt: -0.2, hair: -0.25 }),
-  pose({ dy: 10, sy: 0.84, sx: 1.08, lean: 2, expr: "sad", blink: true, arm: "down", ribbon: 0.15, skirt: 0.25, hair: 0.2 }),
-  pose({ dy: 12, sy: 0.8, sx: 1.1, lean: -4, expr: "sad", arm: "down", ribbon: -0.45, skirt: -0.4, hair: -0.4 }),
-  pose({ dy: 11, sy: 0.82, sx: 1.08, lean: 4, expr: "sad", arm: "down", ribbon: 0.4, skirt: 0.45, hair: 0.35 }),
-  pose({ dy: 13, sy: 0.78, sx: 1.12, lean: -2, expr: "sad", blink: true, arm: "down", ribbon: -0.2, skirt: -0.15, hair: -0.1 }),
-  pose({ dy: 10, sy: 0.84, sx: 1.06, expr: "sad", arm: "down", ribbon: 0.1, skirt: 0.1, hair: 0.1 }),
-  pose({ dy: 8, sy: 0.86, sx: 1.05, lean: 1, expr: "sad", arm: "down", ribbon: -0.05, hair: -0.05 }),
+  pose({ dy: 3, sy: 0.98, expr: "sad", arm: "down", ribbon: -0.1 }),
+  pose({ dy: 10, sy: 0.92, sx: 1.04, lean: -4, expr: "sad", arm: "down", ribbon: -0.3, skirt: -0.2, hair: -0.25 }),
+  pose({ dy: 16, sy: 0.84, sx: 1.08, lean: 3, expr: "sad", blink: true, arm: "down", ribbon: 0.15, skirt: 0.25, hair: 0.2 }),
+  pose({ dy: 18, sy: 0.8, sx: 1.1, lean: -6, expr: "sad", arm: "down", ribbon: -0.45, skirt: -0.4, hair: -0.4 }),
+  pose({ dy: 16, sy: 0.82, sx: 1.08, lean: 6, expr: "sad", arm: "down", ribbon: 0.4, skirt: 0.45, hair: 0.35 }),
+  pose({ dy: 20, sy: 0.78, sx: 1.12, lean: -3, expr: "sad", blink: true, arm: "down", ribbon: -0.2, skirt: -0.15, hair: -0.1 }),
+  pose({ dy: 14, sy: 0.84, sx: 1.06, expr: "sad", arm: "down", ribbon: 0.1, skirt: 0.1, hair: 0.1 }),
+  pose({ dy: 12, sy: 0.86, sx: 1.05, lean: 2, expr: "sad", arm: "down", ribbon: -0.05, hair: -0.05 }),
 ];
 
 const HAPPY = [

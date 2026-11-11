@@ -23,89 +23,89 @@ function zone(
   return { id, x, y, w, h, emotion, action, clip, primary, speakers, lines };
 }
 
-/** Fractions of the 120×200 full-body canvas. Specific parts are listed before the broad ones. */
+/** Fractions of the full-body pixel canvas. Specific parts are listed before the broad ones. */
 const NORMAL_ZONES: ClickZone[] = [
-  zone("ribbon", 0.58, 0.18, 0.3, 0.22, "joyful", "bounce", "joyful", "normal", ["normal"], {
+  zone("ribbon", 0.56, 0.2, 0.26, 0.2, "joyful", "bounce", "joyful", "normal", ["normal"], {
     normal: ["{{honorific}}，蝴蝶结会跟着跳。", "{{honorific}}看这边，结还在。", "这个结是我自己系的，{{honorific}}。"],
   }),
-  zone("face", 0.34, 0.28, 0.32, 0.18, "happy", "nod", "happy", "normal", ["normal"], {
+  zone("face", 0.36, 0.32, 0.28, 0.16, "happy", "nod", "happy", "normal", ["normal"], {
     normal: ["{{honorific}}……这样看着，我会不好意思。", "嗯，{{honorific}}。我在。", "{{honorific}}，有什么事吗。"],
   }),
-  zone("hair", 0.16, 0.12, 0.46, 0.16, "angry", "shake", "angry", "normal", ["normal"], {
+  zone("hair", 0.22, 0.18, 0.32, 0.14, "angry", "shake", "angry", "normal", ["normal"], {
     normal: ["{{honorific}}，头发会乱的。", "请轻一点，{{honorific}}。", "{{honorific}}……那样会痛。"],
   }),
-  zone("bow", 0.38, 0.46, 0.24, 0.1, "happy", "bow", "happy", "normal", ["normal"], {
+  zone("bow", 0.4, 0.5, 0.2, 0.1, "happy", "bow", "happy", "normal", ["normal"], {
     normal: ["{{honorific}}，领结还端正吗。", "我低头给您看，{{honorific}}。"],
   }),
-  zone("apple", 0.34, 0.58, 0.32, 0.14, "happy", "offer", "happy", "normal", ["normal"], {
+  zone("apple", 0.4, 0.64, 0.22, 0.12, "happy", "offer", "happy", "normal", ["normal"], {
     normal: ["{{honorific}}，这个苹果分您吗。", "给您，{{honorific}}。", "{{honorific}}先拿着吧。"],
   }),
-  zone("skirt", 0.22, 0.7, 0.56, 0.1, "sad", "droop", "sad", "normal", ["normal"], {
+  zone("skirt", 0.26, 0.74, 0.48, 0.1, "sad", "droop", "sad", "normal", ["normal"], {
     normal: ["{{honorific}}，裙子不要拉。", "请往上看，{{honorific}}。"],
   }),
-  zone("legs", 0.3, 0.8, 0.4, 0.14, "joyful", "bounce", "joyful", "normal", ["normal"], {
+  zone("legs", 0.34, 0.84, 0.32, 0.12, "joyful", "bounce", "joyful", "normal", ["normal"], {
     normal: ["{{honorific}}，脚边有点痒。", "{{honorific}}……我跳一下。"],
   }),
 ];
 
 const DARK_ZONES: ClickZone[] = [
-  zone("ribbon", 0.6, 0.16, 0.32, 0.22, "joyful", "bounce", "joyful", "dark", ["dark"], {
+  zone("ribbon", 0.56, 0.2, 0.28, 0.22, "joyful", "bounce", "joyful", "dark", ["dark"], {
     dark: ["还算你会看，{{name}}。", "{{name}}，这个结不许拆。", "……喜欢就说，{{name}}。"],
   }),
-  zone("face", 0.34, 0.26, 0.3, 0.18, "happy", "nod", "happy", "dark", ["dark"], {
+  zone("face", 0.36, 0.3, 0.28, 0.16, "happy", "nod", "happy", "dark", ["dark"], {
     dark: ["……看够了吗，{{name}}。", "{{name}}。我在。", "嗯，{{name}}。看也行。"],
   }),
-  zone("hand", 0.36, 0.5, 0.28, 0.12, "joyful", "press", "joyful", "dark", ["dark"], {
+  zone("hand", 0.38, 0.52, 0.24, 0.12, "joyful", "press", "joyful", "dark", ["dark"], {
     dark: ["只许碰这里，{{name}}。", "{{name}}。够了。", "……{{name}}，手是温的。"],
   }),
-  zone("hair-left", 0.08, 0.2, 0.26, 0.42, "angry", "shake", "angry", "dark", ["dark"], {
+  zone("hair-left", 0.16, 0.28, 0.18, 0.36, "angry", "shake", "angry", "dark", ["dark"], {
     dark: ["松手，{{name}}。", "{{name}}。头发，别扯。", "再扯我就生气了，{{name}}。"],
   }),
-  zone("hair-right", 0.7, 0.38, 0.24, 0.28, "angry", "shake", "angry", "dark", ["dark"], {
+  zone("hair-right", 0.72, 0.42, 0.18, 0.28, "angry", "shake", "angry", "dark", ["dark"], {
     dark: ["那边也别扯，{{name}}。", "{{name}}。右边也不行。"],
   }),
-  zone("dress", 0.2, 0.64, 0.6, 0.16, "sad", "droop", "sad", "dark", ["dark"], {
+  zone("dress", 0.22, 0.66, 0.56, 0.16, "sad", "droop", "sad", "dark", ["dark"], {
     dark: ["……别扯那边，{{name}}。", "{{name}}。下面不行。", "……{{name}}，别拉衣服。"],
   }),
-  zone("legs", 0.3, 0.8, 0.4, 0.14, "angry", "shake", "angry", "dark", ["dark"], {
+  zone("legs", 0.34, 0.84, 0.32, 0.12, "angry", "shake", "angry", "dark", ["dark"], {
     dark: ["{{name}}。别踩过来。", "{{name}}，脚边不行。"],
   }),
 ];
 
 const DUO_ZONES: ClickZone[] = [
-  zone("normal-ribbon", 0.74, 0.3, 0.22, 0.16, "joyful", "bounce", "joyful", "normal", ["normal"], {
+  zone("normal-ribbon", 0.7, 0.34, 0.18, 0.12, "joyful", "bounce", "joyful", "normal", ["normal"], {
     normal: ["{{honorific}}，蝴蝶结还在。", "{{honorific}}喜欢这个颜色吗。", "{{honorific}}，这个结我系得很紧。"],
   }),
-  zone("dark-face", 0.2, 0.32, 0.26, 0.18, "happy", "nod", "happy", "dark", ["dark"], {
+  zone("dark-face", 0.24, 0.4, 0.2, 0.14, "happy", "nod", "happy", "dark", ["dark"], {
     dark: ["{{name}}，看这边做什么。", "……{{name}}。我在。", "{{name}}。在。"],
   }),
-  zone("cheek", 0.5, 0.42, 0.12, 0.12, "happy", "press", "happy", "normal", ["normal", "dark"], {
+  zone("cheek", 0.5, 0.44, 0.1, 0.1, "happy", "press", "happy", "normal", ["normal", "dark"], {
     normal: ["{{honorific}}，脸有点热。", "{{honorific}}……请轻一点。"],
     dark: ["{{name}}，轻一点。", "……{{name}}。就一下。"],
   }),
-  zone("normal-face", 0.62, 0.38, 0.16, 0.16, "happy", "nod", "happy", "normal", ["normal"], {
+  zone("normal-face", 0.6, 0.4, 0.14, 0.14, "happy", "nod", "happy", "normal", ["normal"], {
     normal: ["{{honorific}}，我在。", "{{honorific}}……您找我吗。", "嗯，{{honorific}}。"],
   }),
-  zone("bow", 0.58, 0.52, 0.16, 0.08, "happy", "bow", "happy", "normal", ["normal"], {
+  zone("bow", 0.56, 0.54, 0.14, 0.08, "happy", "bow", "happy", "normal", ["normal"], {
     normal: ["{{honorific}}，领结歪了吗。", "我给您看，{{honorific}}。"],
   }),
-  zone("apple", 0.54, 0.66, 0.18, 0.12, "joyful", "offer", "joyful", "normal", ["normal", "dark"], {
+  zone("apple", 0.5, 0.64, 0.18, 0.12, "joyful", "offer", "joyful", "normal", ["normal", "dark"], {
     normal: ["{{honorific}}要的话，可以分您。", "这个苹果，{{honorific}}先拿。"],
     dark: ["{{name}}，这个不能拿走。", "{{name}}。看可以。"],
   }),
-  zone("dark-hair", 0.02, 0.26, 0.2, 0.4, "angry", "shake", "angry", "dark", ["dark"], {
+  zone("dark-hair", 0.06, 0.32, 0.16, 0.28, "angry", "shake", "angry", "dark", ["dark"], {
     dark: ["松手，{{name}}。", "{{name}}，头发别碰。", "再扯我就生气，{{name}}。"],
   }),
-  zone("normal-skirt", 0.66, 0.7, 0.24, 0.12, "sad", "droop", "sad", "normal", ["normal"], {
+  zone("normal-skirt", 0.62, 0.68, 0.2, 0.12, "sad", "droop", "sad", "normal", ["normal"], {
     normal: ["{{honorific}}，裙子有点紧。", "请轻一点，{{honorific}}。"],
   }),
-  zone("dark-dress", 0.1, 0.62, 0.3, 0.2, "sad", "droop", "sad-dark", "dark", ["dark"], {
+  zone("dark-dress", 0.16, 0.62, 0.24, 0.16, "sad", "droop", "sad-dark", "dark", ["dark"], {
     dark: ["……{{name}}，手拿开。", "{{name}}。别拉衣服。"],
   }),
-  zone("normal-legs", 0.62, 0.84, 0.2, 0.12, "joyful", "bounce", "joyful", "normal", ["normal"], {
+  zone("normal-legs", 0.58, 0.8, 0.18, 0.1, "joyful", "bounce", "joyful", "normal", ["normal"], {
     normal: ["{{honorific}}，这边会痒。", "{{honorific}}……我跳一下。"],
   }),
-  zone("dark-legs", 0.22, 0.84, 0.2, 0.12, "angry", "shake", "angry", "dark", ["dark"], {
+  zone("dark-legs", 0.22, 0.8, 0.18, 0.1, "angry", "shake", "angry", "dark", ["dark"], {
     dark: ["{{name}}。脚边不行。", "{{name}}，别踩过来。"],
   }),
 ];

@@ -965,6 +965,24 @@ async function checkPixel(base: string, root: string, user: Record<string, strin
     const hashes = new Set(frames.map((frame) => frame.rgba.toString("base64")));
     assert(hashes.size >= 6, `${form} idle is not two stills`);
   }
+  const duoIdle = decodePng(fs.readFileSync(path.join(root, "packs/pixel-q/animations/duo/idle/01.png")));
+  const band = (x0: number, x1: number) => {
+    let minY = duoIdle.h;
+    let maxY = 0;
+    for (let y = 0; y < duoIdle.h; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (duoIdle.rgba[(y * duoIdle.w + x) * 4 + 3] > 40) {
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    return { minY, span: maxY - minY };
+  };
+  const left = band(Math.round(duoIdle.w * 0.12), Math.round(duoIdle.w * 0.34));
+  const right = band(Math.round(duoIdle.w * 0.66), Math.round(duoIdle.w * 0.88));
+  assert(Math.abs(left.minY - right.minY) < duoIdle.h * 0.06, "duo heads sit at the same chibi scale");
+  assert(Math.abs(left.span - right.span) < duoIdle.h * 0.08, "neither duo figure is a much smaller child");
 
   const files = ["normal/idle/01.png", "normal/joyful/03.png", "dark/idle/01.png", "dark/angry/02.png", "duo/idle/01.png", "duo/sad-dark/01.png"];
   for (const file of files) {
