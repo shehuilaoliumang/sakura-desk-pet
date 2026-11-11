@@ -144,7 +144,7 @@ body[data-window="settings"] { background: var(--settings-bg); }
 
 .bubbles {
   min-height: 0;
-  width: min(100%, calc(360px * var(--pet-scale, 1)));
+  width: min(100%, calc(var(--figure-w, 360px) * var(--pet-scale, 1)));
   flex: 0 0 auto;
   display: grid;
   gap: 6px;
@@ -189,8 +189,8 @@ body[data-window="settings"] { background: var(--settings-bg); }
 .bubble.echo p { font-size: 13px; }
 
 .stage {
-  width: min(100%, calc(360px * var(--pet-scale, 1)));
-  height: calc(480px * var(--pet-scale, 1));
+  width: min(100%, calc(var(--figure-w, 360px) * var(--pet-scale, 1)));
+  height: calc(var(--figure-h, 480px) * var(--pet-scale, 1)));
   /* Leave the bubble stack inside the window. 56px was one short row and clipped the upper duo bubble. */
   max-height: calc(100% - var(--bubble-reserve, 72px));
   min-height: 0;
@@ -726,6 +726,11 @@ body[data-window="chat"] .chat-dock { height: 100%; border-radius: 0; }
 }
 
 .portrait-frame { transform-origin: 50% 72%; }
+.pet-root[data-render="pixel"] .portrait-frame {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  transform-origin: 50% 92%;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .figure, .hair, .ribbon, .eye-open, .lamp.working { animation: none !important; }

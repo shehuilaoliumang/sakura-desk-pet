@@ -3,6 +3,7 @@ import { DEFAULT_PERSONA } from "@shared/defaults";
 import { listLlmProviders } from "@shared/llm";
 import { speakFor } from "@shared/lines";
 import { materializePersona } from "@shared/persona";
+import { PORTRAIT_METRICS } from "@shared/screenLayout";
 import {
   FORM_IDS,
   PET_EVENTS,
@@ -10,6 +11,7 @@ import {
   type FormId,
   type PetEvent,
   type Settings,
+  type StyleDescriptor,
   type ThemeId,
 } from "@shared/types";
 import { INSPIRATION_URL } from "@shared/version";
@@ -24,6 +26,30 @@ const FOLD_DEFAULT: Record<FoldId, boolean> = {
   chat: true,
   advanced: false,
 };
+
+function styleChoices(styles: StyleDescriptor[], draft: Settings): StyleDescriptor[] {
+  if (styles.some((style) => style.id === draft.style)) return styles;
+  return [
+    {
+      id: draft.style,
+      name: draft.style,
+      root: draft.pack.root,
+      order: 100,
+      default: false,
+      render: "paint",
+      layout: PORTRAIT_METRICS,
+    },
+    ...styles,
+  ];
+}
+
+function styleName(styles: StyleDescriptor[], draft: Settings): string {
+  return styleChoices(styles, draft).find((style) => style.id === draft.style)?.name ?? draft.style;
+}
+
+function activeLayout(styles: StyleDescriptor[], draft: Settings) {
+  return styleChoices(styles, draft).find((style) => style.id === draft.style)?.layout ?? PORTRAIT_METRICS;
+}
 
 export function SettingsApp() {
   const backend = useBackend();
@@ -136,6 +162,15 @@ export function SettingsApp() {
     });
   };
 
+  const chooseStyle = (id: string) => {
+    const found = backend.styles.find((style) => style.id === id);
+    edit((current) => ({
+      ...current,
+      style: id,
+      pack: { root: found?.root ?? current.pack.root },
+    }));
+  };
+
   const addTaboo = () => {
     const word = tabooDraft.trim();
     if (!word) return;
@@ -193,7 +228,7 @@ export function SettingsApp() {
           {backend.pack?.warning ? <p className="banner">{backend.pack.warning}</p> : null}
         </header>
 
-        <Section id="basic" title="基础设置" summary={draft.forms[draft.activeForm].displayName} open={openSections.basic} onToggle={toggleSection}>
+        <Section id="basic" title="基础设置" summary={`${styleName(backend.styles, draft)} · ${draft.forms[draft.activeForm].displayName}`} open={openSections.basic} onToggle={toggleSection}>
           <div className="subblock">
             <h3>配色</h3>
             <label className="field">
@@ -206,6 +241,20 @@ export function SettingsApp() {
                 <option value="glass">浅色毛玻璃</option>
               </select>
             </label>
+          </div>
+          <div className="subblock">
+            <h3>风格</h3>
+            <label className="field">
+              <span>形象</span>
+              <select value={draft.style} onChange={(event) => chooseStyle(event.target.value)}>
+                {styleChoices(backend.styles, draft).map((style) => (
+                  <option key={style.id} value={style.id}>{style.name}</option>
+                ))}
+              </select>
+            </label>
+            <p className="hint">
+              换风格只换形象和动作。形态还是 1 / 2 / 3，点击也不会改工作状态。开机默认仍是{styleChoices(backend.styles, draft).find((style) => style.default)?.name ?? "立绘"}。
+            </p>
           </div>
           <div className="subblock">
             <h3>称呼</h3>
@@ -551,7 +600,7 @@ export function SettingsApp() {
           <div className="subblock">
             <h3>窗口与动画包</h3>
             <Slider
-              label={`缩放 % · 约 ${Math.round(360 * draft.window.scale)}×${Math.round(480 * draft.window.scale)}`}
+              label={`缩放 % · 约 ${Math.round(activeLayout(backend.styles, draft).baseW * draft.window.scale)}×${Math.round(activeLayout(backend.styles, draft).stageH * draft.window.scale)}`}
               value={Math.round(draft.window.scale * 100)}
               min={40}
               max={200}
@@ -571,11 +620,19 @@ export function SettingsApp() {
               <span>动画包路径</span>
               <input
                 value={draft.pack.root}
-                onChange={(event) => edit((current) => ({ ...current, pack: { root: event.target.value } }))}
+                onChange={(event) => {
+                  const root = event.target.value;
+                  const found = backend.styles.find((style) => style.root === root);
+                  edit((current) => ({
+                    ...current,
+                    pack: { root },
+                    style: found?.id ?? current.style,
+                  }));
+                }}
               />
             </label>
             <p className="hint">
-              把 <code>idle.webm</code>、<code>thinking.gif</code> 这类文件放进 <code>animations/&lt;形态&gt;/</code>，文件名用六个状态名。喜怒哀乐放在同形态的 <code>angry</code>、<code>sad</code>、<code>joyful</code> 目录，喜沿用原来的 <code>click</code>。没有文件时用内置矢量。点立绘不改工作状态。
+              风格在基础设置里换。这里的路径留给自定义目录：把 <code>idle.webm</code>、<code>thinking.gif</code> 这类文件放进 <code>animations/&lt;形态&gt;/</code>。喜怒哀乐放在同形态的 <code>happy</code>、<code>angry</code>、<code>sad</code>、<code>joyful</code> 目录；立绘的喜仍沿用原来的 <code>click</code>。点人物不改工作状态。
             </p>
             <div className="row-actions">
               <button type="button" onClick={() => void reloadPack()}>重新扫描</button>

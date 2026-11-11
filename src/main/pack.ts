@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { FORM_IDS, PET_EVENTS, type FormId, type PackClip, type PetEvent, type ResolvedPack } from "../shared/types";
+import { FORM_IDS, PET_EVENTS, type FigureLayout, type FormId, type PackClip, type PackStyle, type PetEvent, type ResolvedPack } from "../shared/types";
 
 const LOOP: Record<PetEvent, boolean> = {
   idle: true,
@@ -31,6 +31,7 @@ export function resolvePack(root: string): ResolvedPack {
   let version = "0.1.0";
   let credit = "原创占位矢量，粉丝向重新设计，不是 Fate / TYPE-MOON 的官方素材。";
   let warning: string | null = null;
+  let style: PackStyle | null = null;
 
   if (!fs.existsSync(manifestPath)) {
     warning = "找不到 pack.json，先用内置矢量。";
@@ -41,6 +42,7 @@ export function resolvePack(root: string): ResolvedPack {
       if (typeof raw.name === "string" && raw.name.trim()) name = raw.name.trim();
       if (typeof raw.version === "string" && raw.version.trim()) version = raw.version.trim();
       if (typeof raw.credit === "string") credit = raw.credit;
+      style = readPackStyle(raw.style);
     } catch {
       warning = "pack.json 解析失败，先用内置矢量。";
     }
@@ -67,7 +69,40 @@ export function resolvePack(root: string): ResolvedPack {
     };
   }
 
-  return { id, name, version, credit, root, warning, forms };
+  return { id, name, version, credit, root, warning, style, forms };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function layoutNumber(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.round(Math.min(max, Math.max(min, value)));
+}
+
+/** A pack opts into the style list by declaring style.id and style.name. */
+export function readPackStyle(value: unknown): PackStyle | null {
+  if (!isRecord(value)) return null;
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  const name = typeof value.name === "string" ? value.name.trim() : "";
+  if (!id || !name || id.length > 32 || name.length > 24) return null;
+  if (/[\\/]|\.\./.test(id)) return null;
+  const layoutRaw = isRecord(value.layout) ? value.layout : {};
+  const layout: FigureLayout = {
+    baseW: layoutNumber(layoutRaw.baseW, 360, 160, 800),
+    baseH: layoutNumber(layoutRaw.baseH, 520, 240, 1400),
+    stageH: layoutNumber(layoutRaw.stageH, 480, 160, 1200),
+  };
+  const render = typeof value.render === "string" && value.render.trim() ? value.render.trim().slice(0, 24) : "paint";
+  return {
+    id,
+    name,
+    order: typeof value.order === "number" && Number.isFinite(value.order) ? value.order : 100,
+    default: value.default === true,
+    render,
+    layout,
+  };
 }
 
 function toClip(animRoot: string, form: FormId, state: PetEvent): PackClip {

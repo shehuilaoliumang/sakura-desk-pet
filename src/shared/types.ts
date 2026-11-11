@@ -10,6 +10,30 @@ export type AdapterId = (typeof ADAPTER_IDS)[number];
 /** Known ids live in the provider registry. Stored as a string so a new provider does not need a settings migration. */
 export const DEFAULT_LLM_PROVIDER = "openai-compatible";
 
+/** Built-in default. Other styles are discovered from pack.json, not listed here. */
+export const DEFAULT_STYLE_ID = "portrait";
+
+export interface FigureLayout {
+  baseW: number;
+  baseH: number;
+  stageH: number;
+}
+
+export interface PackStyle {
+  id: string;
+  name: string;
+  order: number;
+  default: boolean;
+  /** "paint" keeps smooth scaling. "pixel" uses crisp pixels. Other values stay smooth until a renderer knows them. */
+  render: string;
+  layout: FigureLayout;
+}
+
+export interface StyleDescriptor extends PackStyle {
+  /** Relative to the app root, for example packs/sakura. */
+  root: string;
+}
+
 export const THEME_IDS = ["warm", "glass"] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
 
@@ -120,6 +144,8 @@ export interface Settings {
   llm: LlmSettings;
   /** warm = 经典暖色, glass = 浅色毛玻璃 */
   theme: ThemeId;
+  /** Active illustration style. The id comes from a pack's style.id. */
+  style: string;
 }
 
 export interface SpeechLine {
@@ -218,6 +244,7 @@ export interface ResolvedPack {
   credit: string;
   root: string;
   warning: string | null;
+  style: PackStyle | null;
   forms: Record<FormId, {
     clips: PackClip[];
     click: ClickClip | null;
@@ -241,4 +268,5 @@ export interface ConfigResponse {
     root: string;
   };
   warning: string | null;
+  styles: StyleDescriptor[];
 }

@@ -1,16 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { bubbleStackReserve, type PetLayoutEvent } from "@shared/screenLayout";
-import {
-  clickTimeline,
-  hitZone,
-  idleTimeline,
-  resolveFrame,
-  speakTouch,
-  workPose,
-  workTimeline,
-  type ClickZone,
-  type PoseTimeline,
-} from "@shared/portrait";
+import { PORTRAIT_METRICS, bubbleStackReserve, type PetLayoutEvent } from "@shared/screenLayout";
+import { playFor } from "@shared/stylePlay";
+import type { ClickZone, PoseTimeline } from "@shared/portrait";
 import { FORM_IDS, STATUS_LABEL, type FormId, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
 import { ChatPanel } from "../chat/ChatPanel";
 import { openSettings, postForm, putWindowScale, quitApp } from "../api";
@@ -46,6 +37,9 @@ export function PetApp() {
   const mood = anim?.name ?? work?.state ?? "idle";
   const library = backend.pack?.forms[activeForm]?.library;
   const illustrated = (library?.idle?.length ?? 0) > 0;
+  const styleId = backend.pack?.style?.id ?? settings?.style ?? "portrait";
+  const play = playFor(styleId);
+  const figureLayout = backend.pack?.style?.layout ?? PORTRAIT_METRICS;
 
   const openDialogue = () => {
     setMenu(null);
@@ -159,7 +153,7 @@ export function PetApp() {
 
   useEffect(() => {
     setTouch(null);
-  }, [activeForm]);
+  }, [activeForm, styleId]);
 
   useEffect(() => {
     if (!menu) return;
@@ -258,14 +252,14 @@ export function PetApp() {
   }
 
   const displayName = settings.forms[activeForm].displayName;
-  const touchSpeech = touch ? speakTouch(settings, touch.zone, touch.pick) : null;
+  const touchSpeech = touch ? play.speakTouch(settings, touch.zone, touch.pick) : null;
   const lines = touchSpeech?.lines ?? say?.lines ?? [];
-  const statusPose = touch ? null : workPose(activeForm, mood, settings.duoVoice.darkShare);
+  const statusPose = touch ? null : play.workPose(activeForm, mood, settings.duoVoice.darkShare);
   const pose = touch
-    ? clickTimeline(touch.zone.clip, touch.zone.action)
+    ? play.clickTimeline(touch.zone.clip, touch.zone.action)
     : statusPose
-      ? workTimeline(statusPose.clip, statusPose.action)
-      : idleTimeline(mood);
+      ? play.workTimeline(statusPose.clip, statusPose.action)
+      : play.idleTimeline(mood);
   const layoutScale = layout?.scale ?? settings.window.scale;
   const stackedDuo = activeForm === "duo" && layout?.bubbleRows === 2;
   const bubbleCount =
@@ -298,7 +292,7 @@ export function PetApp() {
       if (!moved) {
         const rect = portraitRef.current?.getBoundingClientRect();
         if (rect && rect.width > 8 && rect.height > 8) {
-          const zone = hitZone(activeForm, (ev.clientX - rect.left) / rect.width, (ev.clientY - rect.top) / rect.height);
+          const zone = play.hitZone(activeForm, (ev.clientX - rect.left) / rect.width, (ev.clientY - rect.top) / rect.height);
           if (zone) {
             const pick = touchPick.current++;
             setTouch({ zone, pick, nonce: pick });
@@ -325,8 +319,11 @@ export function PetApp() {
   return (
     <div
       className={`pet-root ${pressed ? "pressed" : ""}`}
+      data-render={backend.pack?.style?.render === "pixel" ? "pixel" : "paint"}
       style={{
         ["--pet-scale" as string]: String(layoutScale),
+        ["--figure-w" as string]: `${figureLayout.baseW}px`,
+        ["--figure-h" as string]: `${figureLayout.stageH}px`,
         ["--bubble-reserve" as string]: bubbleReserve != null ? `${bubbleReserve}px` : undefined,
         paddingLeft: menuPad?.left ? menuPad.left : undefined,
         paddingRight: menuPad?.right ? menuPad.right : undefined,
@@ -389,6 +386,8 @@ export function PetApp() {
           facing={anim?.facing ?? null}
           library={illustrated ? library : undefined}
           timeline={pose}
+          styleId={styleId}
+          resolve={play.resolveFrame}
           onEnded={
             touch
               ? () => {
@@ -503,6 +502,8 @@ function PosePlayer({
   facing,
   library,
   timeline,
+  styleId,
+  resolve,
   onEnded,
 }: {
   slotRef: { current: HTMLDivElement | null };
@@ -512,6 +513,8 @@ function PosePlayer({
   facing: "left" | "right" | null;
   library: Record<string, string[]> | undefined;
   timeline: PoseTimeline;
+  styleId: string;
+  resolve: (library: Record<string, string[]> | undefined, pose: PoseTimeline["steps"][number]) => string | null;
   onEnded?: () => void;
 }) {
   const [index, setIndex] = useState(0);
@@ -522,9 +525,9 @@ function PosePlayer({
   stepsRef.current = steps;
   const repeatRef = useRef(timeline.repeatFrom);
   repeatRef.current = timeline.repeatFrom;
-  const signature = `${timeline.repeatFrom ?? "hold"}|${steps
+  const signature = `${styleId}|${timeline.repeatFrom ?? "hold"}|${steps
     .map((item) => `${item.clip}:${item.index}:${item.ms}:${item.x}:${item.y}:${item.rot}:${item.scale}`)
-    .join(";")}|${library?.idle?.[0] ?? ""}|${library?.click?.[0] ?? ""}|${library?.angry?.[0] ?? ""}|${library?.sad?.[0] ?? ""}|${library?.joyful?.[0] ?? ""}`;
+    .join(";")}|${library?.idle?.[0] ?? ""}|${library?.click?.[0] ?? ""}|${library?.angry?.[0] ?? ""}|${library?.sad?.[0] ?? ""}|${library?.joyful?.[0] ?? ""}|${library?.happy?.[0] ?? ""}`;
 
   useEffect(() => {
     setIndex(0);
@@ -548,20 +551,22 @@ function PosePlayer({
   }, [index, library, signature]);
 
   const pose = steps[Math.min(index, Math.max(steps.length - 1, 0))];
-  const url = pose && library ? resolveFrame(library, pose) : null;
+  const url = pose && library ? resolve(library, pose) : null;
   const video = url ? /\.(webm|mov)(\?|$)/i.test(url) : false;
-  const transform = pose
+  const moved = pose ? pose.x !== 0 || pose.y !== 0 || pose.rot !== 0 || pose.scale !== 1 : false;
+  const transform = moved && pose
     ? `translate(${pose.x}%, ${pose.y}%) rotate(${pose.rot}deg) scale(${pose.scale})`
     : undefined;
+  const src = url ? `${url}${url.includes("?") ? "&" : "?"}pack=${encodeURIComponent(styleId)}` : null;
 
   return (
     <div className={`${facing === "left" ? "mirror " : ""}mood-${mood}`} ref={slotRef}>
       {!url ? (
         <PetFigure form={form} mood={mood} name={name} />
       ) : video ? (
-        <video key={url} className="portrait-frame" src={url} autoPlay muted playsInline loop={timeline.repeatFrom != null} />
+        <video key={src} className="portrait-frame" src={src ?? undefined} autoPlay muted playsInline loop={timeline.repeatFrom != null} />
       ) : (
-        <img className="portrait-frame" src={url} alt="" draggable={false} style={transform ? { transform } : undefined} />
+        <img className="portrait-frame" src={src ?? undefined} alt="" draggable={false} style={transform ? { transform } : undefined} />
       )}
     </div>
   );
