@@ -979,8 +979,8 @@ async function checkPixel(base: string, root: string, user: Record<string, strin
     }
     return { minY, span: maxY - minY };
   };
-  const left = band(Math.round(duoIdle.w * 0.12), Math.round(duoIdle.w * 0.34));
-  const right = band(Math.round(duoIdle.w * 0.66), Math.round(duoIdle.w * 0.88));
+  const left = band(Math.round(duoIdle.w * 0.22), Math.round(duoIdle.w * 0.42));
+  const right = band(Math.round(duoIdle.w * 0.55), Math.round(duoIdle.w * 0.75));
   assert(Math.abs(left.minY - right.minY) < duoIdle.h * 0.06, "duo heads sit at the same chibi scale");
   assert(Math.abs(left.span - right.span) < duoIdle.h * 0.08, "neither duo figure is a much smaller child");
 
