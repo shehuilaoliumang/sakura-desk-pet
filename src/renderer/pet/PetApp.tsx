@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { PORTRAIT_METRICS, bubbleStackReserve, type PetLayoutEvent } from "@shared/screenLayout";
 import { playFor } from "@shared/stylePlay";
+import { PIXEL_AMBIENT, gestureZone, type PixelGesture } from "@shared/pixel";
 import type { ClickZone, PoseTimeline } from "@shared/portrait";
 import { FORM_IDS, STATUS_LABEL, type FormId, type PetEvent, type SpeechLine, type WorkStatusData } from "@shared/types";
 import { ChatPanel } from "../chat/ChatPanel";
@@ -19,6 +20,8 @@ export function PetApp() {
   const portraitRef = useRef<HTMLDivElement | null>(null);
   const touchPick = useRef(0);
   const [touch, setTouch] = useState<{ zone: ClickZone; pick: number; nonce: number } | null>(null);
+  const [ambient, setAmbient] = useState<string | null>(null);
+  const lastTap = useRef<{ id: string; at: number } | null>(null);
   const [zoomHint, setZoomHint] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatTall, setChatTall] = useState(false);
@@ -40,6 +43,18 @@ export function PetApp() {
   const styleId = backend.pack?.style?.id ?? settings?.style ?? "portrait";
   const play = playFor(styleId);
   const figureLayout = backend.pack?.style?.layout ?? PORTRAIT_METRICS;
+
+  useEffect(() => {
+    if (styleId !== "pixel-q" || mood !== "idle" || touch) {
+      setAmbient(null);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      const clip = PIXEL_AMBIENT[Math.floor(Math.random() * PIXEL_AMBIENT.length)] ?? "peek";
+      setAmbient(clip);
+    }, 16000);
+    return () => window.clearInterval(timer);
+  }, [styleId, mood, touch]);
 
   const openDialogue = () => {
     setMenu(null);
@@ -257,9 +272,11 @@ export function PetApp() {
   const statusPose = touch ? null : play.workPose(activeForm, mood, settings.duoVoice.darkShare);
   const pose = touch
     ? play.clickTimeline(touch.zone.clip, touch.zone.action)
-    : statusPose
-      ? play.workTimeline(statusPose.clip, statusPose.action)
-      : play.idleTimeline(mood);
+    : ambient && styleId === "pixel-q" && mood === "idle"
+      ? play.clickTimeline(ambient, "sway")
+      : statusPose
+        ? play.workTimeline(statusPose.clip, statusPose.action)
+        : play.idleTimeline(mood);
   const layoutScale = layout?.scale ?? settings.window.scale;
   const stackedDuo = activeForm === "duo" && layout?.bubbleRows === 2;
   const bubbleCount =
@@ -275,6 +292,7 @@ export function PetApp() {
     const cap = (event.target as HTMLElement).closest("[data-hit]") as HTMLElement | null;
     const originX = event.clientX;
     const originY = event.clientY;
+    const downAt = performance.now();
     let moved = false;
     const move = (ev: PointerEvent) => {
       if (Math.hypot(ev.clientX - originX, ev.clientY - originY) > 5) moved = true;
@@ -294,8 +312,18 @@ export function PetApp() {
         if (rect && rect.width > 8 && rect.height > 8) {
           const zone = play.hitZone(activeForm, (ev.clientX - rect.left) / rect.width, (ev.clientY - rect.top) / rect.height);
           if (zone) {
+            let gesture: PixelGesture = "click";
+            if (styleId === "pixel-q") {
+              const held = performance.now() - downAt > 480;
+              const previous = lastTap.current;
+              const repeat = !held && previous && previous.id === zone.id && performance.now() - previous.at < 420;
+              gesture = held ? "hold" : repeat ? "double" : "click";
+              lastTap.current = { id: zone.id, at: performance.now() };
+              setAmbient(null);
+            }
+            const next = styleId === "pixel-q" ? gestureZone(activeForm, zone, gesture) : zone;
             const pick = touchPick.current++;
-            setTouch({ zone, pick, nonce: pick });
+            setTouch({ zone: next, pick, nonce: pick });
           }
         }
       }
@@ -334,6 +362,13 @@ export function PetApp() {
       onPointerDown={onPointerDown}
       onDoubleClick={(event) => {
         if ((event.target as HTMLElement).closest("[data-no-drag]")) return;
+        if (styleId === "pixel-q") {
+          const rect = portraitRef.current?.getBoundingClientRect();
+          if (rect && rect.width > 8 && rect.height > 8) {
+            const zone = play.hitZone(activeForm, (event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height);
+            if (zone) return;
+          }
+        }
         openSettings();
       }}
       onContextMenu={(event) => {
@@ -394,7 +429,9 @@ export function PetApp() {
                   const nonce = touch.nonce;
                   setTouch((current) => (current && current.nonce === nonce ? null : current));
                 }
-              : undefined
+              : ambient
+                ? () => setAmbient(null)
+                : undefined
           }
         />
       </div>

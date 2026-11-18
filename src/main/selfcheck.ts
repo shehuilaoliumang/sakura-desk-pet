@@ -19,6 +19,7 @@ import {
 import {
   hitZone as pixelHit,
   idleTimeline as pixelIdle,
+  reactionsFor as pixelReactions,
   speakTouch as pixelSpeak,
   workPose as pixelWork,
   zonesFor as pixelZones,
@@ -929,10 +930,18 @@ async function checkPixel(base: string, root: string, user: Record<string, strin
     }
     const idle = pixelIdle("idle");
     assert(idle.repeatFrom === 0 && idle.steps.length >= 6, `${form} idle loops a cycle`);
-    assert(idle.steps.every((step) => step.x === 0 && step.y === 0 && step.scale === 1), `${form} motion is in the frames`);
+    assert(idle.steps.every((step) => step.clip === "idle" && step.x === 0 && step.y === 0 && step.scale === 1), `${form} motion is in the frames`);
+    assert(pixelIdle("thinking").steps.every((step) => step.clip === "think"), `${form} thinking uses its own clip`);
+    assert(pixelIdle("working").steps.every((step) => step.clip === "work"), `${form} working uses its own clip`);
+    assert(pixelIdle("waiting").steps.every((step) => step.clip === "wait"), `${form} waiting uses its own clip`);
     assert(pixelIdle("working").steps[0]?.ms !== idle.steps[0]?.ms, `${form} working idle uses a different rhythm`);
   }
   assert(pixelZones("duo").some((zone) => zone.speakers.length === 2), "duo shared props can use both bubbles");
+  assert(pixelReactions("normal").length >= 35, "pixel normal has at least 5× click reactions");
+  assert(pixelReactions("dark").length >= 35, "pixel dark has at least 5× click reactions");
+  assert(pixelReactions("duo").length >= 55, "pixel duo has at least 5× click reactions");
+  const reactionKeys = new Set(pixelReactions("normal").map((item) => `${item.id}:${item.gesture}:${item.clip}`));
+  assert(reactionKeys.size === pixelReactions("normal").length, "pixel reactions stay unique per part and gesture");
   assert(pixelHit("normal", 0.02, 0.02) === null, "pixel clicks in the empty margin do nothing");
   assert(pixelWork("normal", "success", 70)?.clip === "happy", "pixel success plays 喜");
   assert(pixelWork("normal", "error", 70)?.emotion === "sad", "pixel normal error plays 哀");
