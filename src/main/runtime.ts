@@ -21,6 +21,8 @@ import type {
 } from "../shared/types";
 import { FORM_IDS, isFormId } from "../shared/types";
 import { clipLoop, resolvePack } from "./pack";
+import { discoverStyles } from "./styleCatalog";
+import type { StyleDescriptor } from "../shared/types";
 
 interface Leaf<T> {
   counter: number;
@@ -34,6 +36,7 @@ export class PetRuntime extends EventEmitter {
   settings: Settings = defaultSettings();
   warning: string | null = null;
   pack: ResolvedPack;
+  catalog: StyleDescriptor[] = [];
   version = 0;
   private revision = 0;
   private boundPort = 7341;
@@ -83,6 +86,7 @@ export class PetRuntime extends EventEmitter {
           this.settings = defaultSettings();
         } else {
           this.settings = result.settings;
+          this.reconcileLoaded(isRecord(parsed) && typeof parsed.style === "string");
           const corrupt = corruptSettingsText(this.settings);
           if (corrupt) {
             this.warning = corrupt;
@@ -98,7 +102,10 @@ export class PetRuntime extends EventEmitter {
       }
     } else {
       this.settings = defaultSettings();
+      this.catalog = discoverStyles(this.opts.appRoot);
     }
+
+    if (!this.catalog.length) this.catalog = discoverStyles(this.opts.appRoot);
 
     const bootForm = this.settings.forms[this.settings.defaultForm].enabled ? this.settings.defaultForm : "normal";
     this.settings.activeForm = bootForm;
@@ -178,6 +185,7 @@ export class PetRuntime extends EventEmitter {
         root: this.opts.appRoot,
       },
       warning: this.warning,
+      styles: this.catalog,
     };
   }
 
@@ -194,6 +202,7 @@ export class PetRuntime extends EventEmitter {
     if (!parsed.ok) return parsed;
     const prev = this.settings;
     this.settings = parsed.settings;
+    this.reconcileEdited(prev, isRecord(input) ? input : {});
     this.warning = null;
     this.persist();
     this.afterSettings(prev, reason);
@@ -428,6 +437,33 @@ export class PetRuntime extends EventEmitter {
     leaf.data = data;
   }
 
+  private reconcileLoaded(fileHadStyle: boolean): void {
+    this.catalog = discoverStyles(this.opts.appRoot);
+    const byId = this.catalog.find((style) => style.id === this.settings.style);
+    const byRoot = this.catalog.find((style) => style.root === this.settings.pack.root);
+    if (!fileHadStyle) {
+      if (byRoot) this.settings.style = byRoot.id;
+      return;
+    }
+    if (byId && byRoot && byId.id !== byRoot.id) this.settings.pack.root = byId.root;
+    else if (!byId && byRoot) this.settings.style = byRoot.id;
+  }
+
+  /** Style dropdown and the pack path stay pointed at the same catalog entry. A custom path is left alone. */
+  private reconcileEdited(prev: Settings, patch: Record<string, unknown>): void {
+    this.catalog = discoverStyles(this.opts.appRoot);
+    const next = this.settings;
+    const styleChanged = next.style !== prev.style;
+    const rootChanged = next.pack.root !== prev.pack.root;
+    const byId = this.catalog.find((style) => style.id === next.style);
+    const byRoot = this.catalog.find((style) => style.root === next.pack.root);
+    if (styleChanged && byId && (!rootChanged || next.pack.root === byId.root || next.pack.root === prev.pack.root)) {
+      next.pack.root = byId.root;
+      return;
+    }
+    if (rootChanged && byRoot) next.style = byRoot.id;
+  }
+
   private packRoot(): string {
     const root = this.settings.pack.root.trim() || "packs/sakura";
     return path.isAbsolute(root) ? root : path.join(this.opts.appRoot, root);
@@ -595,6 +631,10 @@ export function nextDiskReaction(input: {
     return { warning: DISK_JSON_WARNING, streak, schedule: false };
   }
   return { warning: input.warning, streak: 0, schedule: false };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 /** settings.json is UTF-8. UTF-16 (PowerShell's default) must not be decoded as text. */

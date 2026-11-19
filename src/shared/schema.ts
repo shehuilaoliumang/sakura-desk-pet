@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defaultSettings } from "./defaults";
 import {
   DEFAULT_LLM_PROVIDER,
+  DEFAULT_STYLE_ID,
   FORM_IDS,
   FORM_SLOT,
   REASONING_EFFORTS,
@@ -76,6 +77,7 @@ export const settingsSchema = z.object({
     reasoningEffort: z.enum(REASONING_EFFORTS),
   }),
   theme: z.enum(THEME_IDS),
+  style: z.string(),
 });
 
 function clamp(n: number, min: number, max: number): number {
@@ -107,6 +109,7 @@ export function normalizeSettings(input: Settings): Settings {
   s.llm.timeoutMs = Math.round(clamp(s.llm.timeoutMs, 500, 120_000));
   if (!isReasoningEffort(s.llm.reasoningEffort)) s.llm.reasoningEffort = "auto";
   if (!isThemeId(s.theme)) s.theme = "warm";
+  s.style = s.style.trim().slice(0, 32) || DEFAULT_STYLE_ID;
 
   for (const id of FORM_IDS) {
     const slot = s.forms[id];
@@ -177,6 +180,7 @@ export function mergeSettings(base: Settings, input: unknown): Settings {
     }
   }
   if (typeof src.theme === "string" && isThemeId(src.theme)) next.theme = src.theme;
+  if (typeof src.style === "string") next.style = src.style;
   if (isRecord(src.forms)) {
     for (const id of FORM_IDS) {
       const patch = src.forms[id];

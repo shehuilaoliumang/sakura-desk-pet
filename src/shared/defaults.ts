@@ -1,6 +1,7 @@
 import {
   DEFAULT_DISPLAY_NAME,
   DEFAULT_LLM_PROVIDER,
+  DEFAULT_STYLE_ID,
   FORM_IDS,
   FORM_SLOT,
   type FormId,
@@ -85,5 +86,6 @@ export function defaultSettings(): Settings {
       reasoningEffort: "auto",
     },
     theme: "warm",
+    style: DEFAULT_STYLE_ID,
   };
 }

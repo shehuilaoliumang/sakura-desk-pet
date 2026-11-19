@@ -34,6 +34,10 @@ export const BUBBLE_HEADROOM = 28;
 export const STACK_GAP = 6;
 const STAGE_BASE_H = 480;
 
+/** Portrait window. A style pack can pass a different layout without changing this default. */
+export type FigureMetrics = { baseW: number; baseH: number; stageH: number };
+export const PORTRAIT_METRICS: FigureMetrics = { baseW: BASE_W, baseH: BASE_H, stageH: STAGE_BASE_H };
+
 /** Pixels above the stage that a window must keep free for `rows` of bubbles. */
 export function bubbleStackReserve(rows: 1 | 2): number {
   const bubbleBlock = rows * BUBBLE_ROW_H + Math.max(0, rows - 1) * STACK_GAP;
@@ -41,7 +45,7 @@ export function bubbleStackReserve(rows: 1 | 2): number {
   return FIT_PAD_TOP + head + bubbleBlock + STACK_GAP + FIT_PAD_BOTTOM;
 }
 
-export function petWindowSize(scale: number): {
+export function petWindowSize(scale: number, metrics: FigureMetrics = PORTRAIT_METRICS): {
   width: number;
   height: number;
   contentW: number;
@@ -50,8 +54,8 @@ export function petWindowSize(scale: number): {
   top: number;
   bottom: number;
 } {
-  const contentW = Math.round(BASE_W * scale);
-  const contentH = Math.round(BASE_H * scale);
+  const contentW = Math.round(metrics.baseW * scale);
+  const contentH = Math.round(metrics.baseH * scale);
   const side = Math.max(200, Math.round(contentW * WINDOW_MARGIN_RATIO));
   const top = Math.max(56, Math.round(side * 0.28));
   const bottom = Math.max(40, Math.round(side * 0.22));
@@ -102,18 +106,23 @@ function clampScale(scale: number): number {
  * shrinks the figure only when it would pass 80% of the work-area width.
  * Height includes the bubble rows so stacked duo lines are not clipped.
  */
-export function fitPetChrome(requestedScale: number, work: { width: number; height: number }, form: PetFormKind): PetFit {
+export function fitPetChrome(
+  requestedScale: number,
+  work: { width: number; height: number },
+  form: PetFormKind,
+  metrics: FigureMetrics = PORTRAIT_METRICS,
+): PetFit {
   const requested = clampScale(requestedScale);
   const narrow = work.width <= NARROW_WORK_MAX;
   const maxContentW = Math.max(144, Math.floor(work.width * CONTENT_MAX_RATIO));
   let scale = requested;
   if (narrow) {
-    while (Math.round(BASE_W * scale) > maxContentW && scale > 0.4) {
+    while (Math.round(metrics.baseW * scale) > maxContentW && scale > 0.4) {
       scale = clampScale(scale - 0.01);
     }
   }
-  const contentW = Math.round(BASE_W * scale);
-  const stageH = Math.round(STAGE_BASE_H * scale);
+  const contentW = Math.round(metrics.baseW * scale);
+  const stageH = Math.round(metrics.stageH * scale);
   const bubbleRows: 1 | 2 = form !== "duo" ? 1 : narrow ? (contentW >= DUO_COLUMNS_MIN_W ? 1 : 2) : scale >= 0.6 ? 1 : 2;
   const bubbleBlock = bubbleRows * BUBBLE_ROW_H + Math.max(0, bubbleRows - 1) * STACK_GAP;
   const contentH = bubbleBlock + STACK_GAP + stageH;
@@ -121,7 +130,7 @@ export function fitPetChrome(requestedScale: number, work: { width: number; heig
   const neededH = minTop + contentH + FIT_PAD_BOTTOM;
 
   if (!narrow && bubbleRows < 2) {
-    const generous = petWindowSize(requested);
+    const generous = petWindowSize(requested, metrics);
     return {
       scale: requested,
       narrow: false,
@@ -137,7 +146,7 @@ export function fitPetChrome(requestedScale: number, work: { width: number; heig
   }
 
   if (!narrow) {
-    const generous = petWindowSize(requested);
+    const generous = petWindowSize(requested, metrics);
     const bottom = FIT_PAD_BOTTOM;
     let top = Math.max(minTop, generous.height - contentH - bottom);
     let height = top + contentH + bottom;

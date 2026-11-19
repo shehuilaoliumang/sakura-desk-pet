@@ -5,12 +5,14 @@ import { dataDir } from "../src/main/paths";
 import { PetRuntime, type ChangeReason } from "../src/main/runtime";
 import { startServer } from "../src/main/server";
 import {
+  PORTRAIT_METRICS,
   anchorPetBottomCenter,
   clampOriginKeepingCenter,
   cursorFollowOrigin,
   displayUnderPoint,
   fitPetChrome,
   layoutContextMenu,
+  type FigureMetrics,
   type PetFit,
   type Rect,
 } from "../src/shared/screenLayout";
@@ -94,7 +96,7 @@ function rendererUrl(hash: string): string | null {
 function createPetWindow(): void {
   if (!runtime) return;
   const scale = runtime.settings.window.scale;
-  const initial = fitPetChrome(scale, screen.getPrimaryDisplay().workArea, runtime.settings.activeForm === "duo" ? "duo" : "single");
+  const initial = chromeFit(scale, screen.getPrimaryDisplay().workArea);
   const icon = path.join(appRoot(), "assets", "icon.png");
   petWin = new BrowserWindow({
     ...(fs.existsSync(icon) ? { icon } : {}),
@@ -214,6 +216,14 @@ function formKind(): "duo" | "single" {
   return runtime?.settings.activeForm === "duo" ? "duo" : "single";
 }
 
+function activeLayout(): FigureMetrics {
+  return runtime?.pack.style?.layout ?? PORTRAIT_METRICS;
+}
+
+function chromeFit(scale: number, area: { width: number; height: number }): PetFit {
+  return fitPetChrome(scale, area, formKind(), activeLayout());
+}
+
 function pushLayout(): void {
   if (!petWin || petWin.isDestroyed() || !currentFit) return;
   const fit = currentFit;
@@ -266,7 +276,7 @@ function refitPet(): void {
   const area =
     displayUnderPoint(areas, current.x + current.width / 2, current.y + current.height / 2) ??
     screen.getPrimaryDisplay().workArea;
-  const fitted = fitPetChrome(runtime.settings.window.scale, area, formKind());
+  const fitted = chromeFit(runtime.settings.window.scale, area);
   const pos = anchorPetBottomCenter(current, fitted);
   const next = clampOriginKeepingCenter({ x: pos.x, y: pos.y, width: fitted.width, height: fitted.height }, areas);
   applyFit(next, fitted);
@@ -280,7 +290,7 @@ function placePet(force: boolean): void {
     const visible = areas.some((b) => x >= b.x - 40 && y >= b.y - 40 && x < b.x + b.width - 20 && y < b.y + b.height - 20);
     if (visible) {
       const area = displayUnderPoint(areas, x + 24, y + 24) ?? screen.getPrimaryDisplay().workArea;
-      const fitted = fitPetChrome(runtime.settings.window.scale, area, formKind());
+      const fitted = chromeFit(runtime.settings.window.scale, area);
       const next = clampOriginKeepingCenter({ x, y, width: fitted.width, height: fitted.height }, areas);
       applyFit(next, fitted);
       return;
@@ -288,7 +298,7 @@ function placePet(force: boolean): void {
   }
   if (!force && (typeof x === "number" || typeof y === "number")) return;
   const area = screen.getPrimaryDisplay().workArea;
-  const fitted = fitPetChrome(runtime.settings.window.scale, area, formKind());
+  const fitted = chromeFit(runtime.settings.window.scale, area);
   applyFit(
     {
       x: Math.round(area.x + area.width - fitted.width - 40),
@@ -566,10 +576,9 @@ function wireIpc(): void {
     const live = win.getBounds();
     const fit =
       currentFit ??
-      fitPetChrome(
+      chromeFit(
         runtime.settings.window.scale,
         displayUnderPoint(workAreas(), live.x + live.width / 2, live.y + live.height / 2) ?? screen.getPrimaryDisplay().workArea,
-        formKind(),
       );
     const winOrigin = menuChrome
       ? { x: menuChrome.x, y: menuChrome.y, width: fit.width, height: fit.height }

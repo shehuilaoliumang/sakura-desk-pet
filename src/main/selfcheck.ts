@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { defaultSettings } from "../shared/defaults";
 import {
@@ -15,7 +16,17 @@ import {
   workTimeline,
   zonesFor,
 } from "../shared/portrait";
+import {
+  hitZone as pixelHit,
+  idleTimeline as pixelIdle,
+  reactionsFor as pixelReactions,
+  speakTouch as pixelSpeak,
+  workPose as pixelWork,
+  zonesFor as pixelZones,
+} from "../shared/pixel";
+import { playFor } from "../shared/stylePlay";
 import { resolvePack } from "./pack";
+import { discoverStyles } from "./styleCatalog";
 import { parseSettings } from "../shared/schema";
 import { LLM_FALLBACK_LINE, buildChatSystemPrompt, chatWithLlm, openAiCompatibleChatUrl, type LlmFetch } from "../shared/llm";
 import { DISK_JSON_WARNING, judgeSettingsSnapshot, nextDiskReaction, PetRuntime } from "./runtime";
@@ -194,6 +205,7 @@ async function main(): Promise<void> {
     await checkReasoningReply();
     await checkDuoPartnerRetry();
     await checkPortrait(base, appRoot);
+    await checkPixel(base, appRoot, user);
     checkSwitchFalseAlarms();
 
     console.log("sakura-pet selfcheck ok");
@@ -801,6 +813,214 @@ async function checkPortrait(base: string, root: string): Promise<void> {
   const after = await stateOf(base);
   assert(after.sections.workStatus.data.state === before.sections.workStatus.data.state, "reading portrait frames does not change work status");
   assert(after.sections.config.data.activeForm === before.sections.config.data.activeForm, "reading portrait frames does not change form");
+}
+
+function decodePng(buf: Buffer): { w: number; h: number; rgba: Buffer } {
+  let offset = 8;
+  const parts: Buffer[] = [];
+  let w = 0;
+  let h = 0;
+  while (offset < buf.length) {
+    const len = buf.readUInt32BE(offset);
+    offset += 4;
+    const type = buf.subarray(offset, offset + 4).toString();
+    offset += 4;
+    const data = buf.subarray(offset, offset + len);
+    offset += len + 4;
+    if (type === "IHDR") {
+      w = data.readUInt32BE(0);
+      h = data.readUInt32BE(4);
+    }
+    if (type === "IDAT") parts.push(data);
+  }
+  const raw = zlib.inflateSync(Buffer.concat(parts));
+  const rgba = Buffer.alloc(w * h * 4);
+  let cursor = 0;
+  for (let y = 0; y < h; y++) {
+    if (raw[cursor] !== 0) throw new Error("png filter");
+    cursor += 1;
+    raw.copy(rgba, y * w * 4, cursor, cursor + w * 4);
+    cursor += w * 4;
+  }
+  return { w, h, rgba };
+}
+
+function centroid(image: { w: number; h: number; rgba: Buffer }): { cx: number; cy: number; minY: number; maxY: number; transparent: number } {
+  let n = 0;
+  let sx = 0;
+  let sy = 0;
+  let minY = image.h;
+  let maxY = 0;
+  let transparent = 0;
+  for (let y = 0; y < image.h; y++) {
+    for (let x = 0; x < image.w; x++) {
+      const alpha = image.rgba[(y * image.w + x) * 4 + 3];
+      if (alpha < 16) {
+        transparent += 1;
+        continue;
+      }
+      n += 1;
+      sx += x;
+      sy += y;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return { cx: sx / n, cy: sy / n, minY, maxY, transparent };
+}
+
+async function checkPixel(base: string, root: string, user: Record<string, string>): Promise<void> {
+  const styles = discoverStyles(root);
+  const portrait = styles.find((style) => style.id === "portrait");
+  const pixel = styles.find((style) => style.id === "pixel-q");
+  assert(portrait?.name === "立绘" && portrait.default && portrait.root === "packs/sakura", "立绘 stays the default style");
+  assert(pixel?.name === "像素Q" && pixel.render === "pixel" && pixel.root === "packs/pixel-q", "像素Q is discovered by name");
+  assert((portrait?.order ?? 0) < (pixel?.order ?? 0), "立绘 is listed before 像素Q");
+  assert(pixel && pixel.layout.stageH > (portrait?.layout.stageH ?? 0), "像素Q asks for a taller stage");
+
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-style-"));
+  fs.mkdirSync(path.join(scratch, "packs", "ink"), { recursive: true });
+  fs.writeFileSync(
+    path.join(scratch, "packs", "ink", "pack.json"),
+    JSON.stringify({ style: { id: "ink", name: "水墨", order: 2, layout: { baseW: 300, baseH: 640, stageH: 560 } } }),
+  );
+  const extra = discoverStyles(scratch);
+  assert(extra.length === 1 && extra[0]?.id === "ink" && extra[0].name === "水墨", "a third style is picked up from its pack.json");
+  assert(extra[0]?.layout.stageH === 560, "a third style keeps its own layout");
+  fs.rmSync(scratch, { recursive: true, force: true });
+
+  const future = playFor("ink");
+  assert(future.id === "ink", "an unknown style gets its own player instead of being forced into 立绘");
+  const futureHit = future.hitZone("normal", 0.5, 0.4);
+  assert(futureHit?.primary === "normal", "a future style can still be clicked");
+  assert(future.speakTouch(defaultSettings(), futureHit!, 0).text.includes("前辈"), "a future style still addresses 前辈");
+  assert(future.workPose("dark", "error", 70)?.emotion === "angry", "a future style keeps the dark error rule");
+  assert(playFor("portrait").hitZone("normal", 0.5, 0.26)?.id === hitZone("normal", 0.5, 0.26)?.id, "立绘 clicks still go through the portrait map");
+
+  const before = await stateOf(base);
+  const switched = await call(base, "PUT", "/pet/config", { style: "pixel-q" }, user);
+  assert(switched.status === 200, "style switch is accepted");
+  const switchedBody = switched.json as { settings?: { style?: string; pack?: { root?: string }; activeForm?: string }; warning?: string | null };
+  assert(switchedBody.settings?.style === "pixel-q", "settings remember 像素Q");
+  assert(switchedBody.settings?.pack?.root === "packs/pixel-q", "像素Q points at its own pack");
+  assert(switchedBody.settings?.activeForm === before.sections.config.data.activeForm, "switching style does not change form");
+  assert(switchedBody.warning == null, "switching style does not warn");
+  const mid = await stateOf(base);
+  assert(mid.sections.config.data.activeForm === before.sections.config.data.activeForm, "style switch leaves the form alone");
+  assert(mid.sections.workStatus.data.state === before.sections.workStatus.data.state, "style switch leaves work status alone");
+
+  const pack = resolvePack(path.join(root, "packs", "pixel-q"));
+  assert(pack.style?.id === "pixel-q" && pack.style.name === "像素Q", "pixel pack names itself 像素Q");
+  const portraitPack = resolvePack(path.join(root, "packs", "sakura"));
+  for (const form of ["normal", "dark", "duo"] as const) {
+    const library = pack.forms[form].library;
+    for (const name of ["idle", "happy", "angry", "sad", "joyful"] as const) {
+      assert((library[name]?.length ?? 0) >= 6, `${form} ${name} is a frame cycle`);
+    }
+    const zones = pixelZones(form);
+    for (const emotion of ["happy", "angry", "sad", "joyful"] as const) {
+      assert(zones.some((zone) => zone.emotion === emotion), `${form} can play ${emotion}`);
+    }
+    for (const zone of zones) {
+      const hit = pixelHit(form, zone.x + zone.w / 2, zone.y + zone.h / 2);
+      assert(hit?.id === zone.id, `${form} ${zone.id} center hit ${hit?.id ?? "nothing"}`);
+      const spoken = pixelSpeak(defaultSettings(), zone, 0);
+      assert(spoken.lines.length >= 1 && spoken.text.includes("前辈"), `${form} ${zone.id} addresses 前辈`);
+      assert(!spoken.text.includes("黑樱") && !spoken.text.includes("常态樱") && !spoken.text.includes("她"), `${form} ${zone.id} does not name the other voice`);
+    }
+    const idle = pixelIdle("idle");
+    assert(idle.repeatFrom === 0 && idle.steps.length >= 6, `${form} idle loops a cycle`);
+    assert(idle.steps.every((step) => step.clip === "idle" && step.x === 0 && step.y === 0 && step.scale === 1), `${form} motion is in the frames`);
+    assert(pixelIdle("thinking").steps.every((step) => step.clip === "think"), `${form} thinking uses its own clip`);
+    assert(pixelIdle("working").steps.every((step) => step.clip === "work"), `${form} working uses its own clip`);
+    assert(pixelIdle("waiting").steps.every((step) => step.clip === "wait"), `${form} waiting uses its own clip`);
+    assert(pixelIdle("working").steps[0]?.ms !== idle.steps[0]?.ms, `${form} working idle uses a different rhythm`);
+  }
+  assert(pixelZones("duo").some((zone) => zone.speakers.length === 2), "duo shared props can use both bubbles");
+  assert(pixelReactions("normal").length >= 35, "pixel normal has at least 5× click reactions");
+  assert(pixelReactions("dark").length >= 35, "pixel dark has at least 5× click reactions");
+  assert(pixelReactions("duo").length >= 55, "pixel duo has at least 5× click reactions");
+  const reactionKeys = new Set(pixelReactions("normal").map((item) => `${item.id}:${item.gesture}:${item.clip}`));
+  assert(reactionKeys.size === pixelReactions("normal").length, "pixel reactions stay unique per part and gesture");
+  assert(pixelHit("normal", 0.02, 0.02) === null, "pixel clicks in the empty margin do nothing");
+  assert(pixelWork("normal", "success", 70)?.clip === "happy", "pixel success plays 喜");
+  assert(pixelWork("normal", "error", 70)?.emotion === "sad", "pixel normal error plays 哀");
+  assert(pixelWork("dark", "error", 70)?.emotion === "angry", "pixel dark error plays 怒");
+  assert(pixelWork("duo", "error", 70)?.clip === "angry", "pixel duo error follows 黑樱 when she has the larger share");
+  assert(pixelWork("duo", "error", 40)?.clip === "sad", "pixel duo error follows 常态樱 when her share is larger");
+  assert(pixelWork("normal", "thinking", 70) === null, "pixel thinking stays on the idle cycle");
+
+  assert((portraitPack.forms.normal.library.idle?.length ?? 0) >= 2, "立绘 idle files are untouched");
+  assert(!portraitPack.forms.normal.library.happy, "立绘 still reuses click for 喜");
+  for (const form of ["normal", "dark", "duo"] as const) {
+    const frames = Array.from({ length: 8 }, (_, index) =>
+      decodePng(fs.readFileSync(path.join(root, `packs/pixel-q/animations/${form}/idle/${String(index + 1).padStart(2, "0")}.png`))),
+    );
+    const bodies = frames.map(centroid);
+    assert(bodies[0] && bodies[0].transparent > frames[0]!.w * frames[0]!.h * 0.2, `${form} idle has a transparent ground`);
+    assert(bodies[0]!.minY < frames[0]!.h * 0.4 && bodies[0]!.maxY > frames[0]!.h * 0.85, `${form} shows head and feet`);
+    const span = (Math.max(...bodies.map((item) => item.cy)) - Math.min(...bodies.map((item) => item.cy))) / frames[0]!.h;
+    assert(span > 0.08, `${form} idle bobs more than the portrait's small breath`);
+    const joy = Array.from({ length: 8 }, (_, index) =>
+      centroid(decodePng(fs.readFileSync(path.join(root, `packs/pixel-q/animations/${form}/joyful/${String(index + 1).padStart(2, "0")}.png`)))),
+    );
+    const joySpan = (Math.max(...joy.map((item) => item.cy)) - Math.min(...joy.map((item) => item.cy))) / frames[0]!.h;
+    assert(joySpan > span, `${form} 乐 jumps higher than idle`);
+    const angry = Array.from({ length: 8 }, (_, index) =>
+      centroid(decodePng(fs.readFileSync(path.join(root, `packs/pixel-q/animations/${form}/angry/${String(index + 1).padStart(2, "0")}.png`)))),
+    );
+    const shake = (Math.max(...angry.map((item) => item.cx)) - Math.min(...angry.map((item) => item.cx))) / frames[0]!.w;
+    assert(shake > 0.04, `${form} 怒 shakes`);
+    const hashes = new Set(frames.map((frame) => frame.rgba.toString("base64")));
+    assert(hashes.size >= 6, `${form} idle is not two stills`);
+  }
+  const duoIdle = decodePng(fs.readFileSync(path.join(root, "packs/pixel-q/animations/duo/idle/01.png")));
+  const band = (x0: number, x1: number) => {
+    let minY = duoIdle.h;
+    let maxY = 0;
+    for (let y = 0; y < duoIdle.h; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (duoIdle.rgba[(y * duoIdle.w + x) * 4 + 3] > 40) {
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    return { minY, span: maxY - minY };
+  };
+  const left = band(Math.round(duoIdle.w * 0.22), Math.round(duoIdle.w * 0.42));
+  const right = band(Math.round(duoIdle.w * 0.55), Math.round(duoIdle.w * 0.75));
+  assert(Math.abs(left.minY - right.minY) < duoIdle.h * 0.06, "duo heads sit at the same chibi scale");
+  assert(Math.abs(left.span - right.span) < duoIdle.h * 0.08, "neither duo figure is a much smaller child");
+
+  const files = ["normal/idle/01.png", "normal/joyful/03.png", "dark/idle/01.png", "dark/angry/02.png", "duo/idle/01.png", "duo/sad-dark/01.png"];
+  for (const file of files) {
+    const response = await fetch(`${base}/pet/media/${file}`);
+    assert(response.status === 200, `pixel ${file} is served`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert(bytes[0] === 0x89 && bytes[1] === 0x50, `pixel ${file} is a png`);
+  }
+  const afterMedia = await stateOf(base);
+  assert(afterMedia.sections.workStatus.data.state === before.sections.workStatus.data.state, "reading pixel frames does not change work status");
+  assert(afterMedia.sections.config.data.activeForm === before.sections.config.data.activeForm, "reading pixel frames does not change form");
+
+  const back = await call(base, "PUT", "/pet/config", { style: "portrait" }, user);
+  const backBody = back.json as { settings?: { style?: string; pack?: { root?: string } } };
+  assert(backBody.settings?.style === "portrait" && backBody.settings.pack?.root === "packs/sakura", "switching back restores 立绘");
+
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-pixel-switch-"));
+  const runtime = new PetRuntime({ dataDir, appRoot: root });
+  runtime.load();
+  const form = runtime.settings.activeForm;
+  runtime.replaceSettings({ style: "pixel-q" });
+  assert(runtime.settings.style === "pixel-q" && runtime.settings.activeForm === form, "a style write keeps the form");
+  assert(runtime.warning === null, "choosing 像素Q does not warn");
+  runtime.acceptDiskText("");
+  runtime.acceptDiskText("{");
+  assert(runtime.warning === null, "a torn read during the style write is not shown as bad JSON");
+  assert(runtime.settings.style === "pixel-q", "the style survives the torn read");
+  runtime.dispose();
+  fs.rmSync(dataDir, { recursive: true, force: true });
 }
 
 main().catch((error: unknown) => {

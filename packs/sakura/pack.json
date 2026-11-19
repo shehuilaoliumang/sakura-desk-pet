@@ -3,5 +3,13 @@
   "name": "樱 · 原型构图",
   "version": "0.2.0",
   "credit": "按参考构图重画的桌宠立绘，不是 Fate / TYPE-MOON 的官方素材。",
-  "animationDir": "animations"
+  "animationDir": "animations",
+  "style": {
+    "id": "portrait",
+    "name": "立绘",
+    "order": 0,
+    "default": true,
+    "render": "paint",
+    "layout": { "baseW": 360, "baseH": 520, "stageH": 480 }
+  }
 }

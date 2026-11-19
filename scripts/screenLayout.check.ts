@@ -356,4 +356,20 @@ const primaryWork: Rect = { x: 0, y: 0, width: 1600, height: 952 };
   assert.ok(fit.width < dragging.width);
 }
 
+{
+  const pixel = { baseW: 360, baseH: 700, stageH: 600 };
+  const portraitFit = fitPetChrome(1, primaryWork, "single");
+  const fit = fitPetChrome(1, primaryWork, "single", pixel);
+  assert.equal(fit.width, portraitFit.width, "a taller style keeps the portrait bubble width");
+  assert.equal(fit.height, 800);
+  assert.ok(fit.height > portraitFit.height, "full-body chrome is taller than the portrait window");
+  const narrow = fitPetChrome(0.65, portraitWork, "duo", pixel);
+  const portraitNarrow = fitPetChrome(0.65, portraitWork, "duo");
+  assert.equal(narrow.bubbleRows, 2, "narrow pixel duo still stacks bubbles");
+  assert.equal(narrow.contentW, 234, "pixel duo keeps a readable bubble width");
+  assert.ok(narrow.height > portraitNarrow.height);
+  assert.ok(narrow.height <= portraitWork.height - 16, "taller chrome still fits the narrow work area");
+  assert.ok(narrow.width <= portraitWork.width - 16);
+}
+
 console.log("screenLayout checks ok");

@@ -1,0 +1,14 @@
+{
+  "id": "sakura-pixel",
+  "name": "樱 · 像素Q",
+  "version": "0.1.0",
+  "credit": "原创像素 Q 版全身重绘，不是 Fate / TYPE-MOON 的官方素材。",
+  "animationDir": "animations",
+  "style": {
+    "id": "pixel-q",
+    "name": "像素Q",
+    "order": 1,
+    "render": "pixel",
+    "layout": { "baseW": 360, "baseH": 700, "stageH": 600 }
+  }
+}

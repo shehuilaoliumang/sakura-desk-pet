@@ -6,6 +6,7 @@ export interface Backend {
   settings: Settings | null;
   state: PublicState | null;
   pack: ResolvedPack | null;
+  styles: ConfigResponse["styles"];
   paths: ConfigResponse["paths"] | null;
   api: ConfigResponse["api"] | null;
   warning: string | null;
@@ -16,6 +17,7 @@ export function useBackend(): Backend {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [state, setState] = useState<PublicState | null>(null);
   const [pack, setPack] = useState<ResolvedPack | null>(null);
+  const [styles, setStyles] = useState<ConfigResponse["styles"]>([]);
   const [paths, setPaths] = useState<ConfigResponse["paths"] | null>(null);
   const [api, setApi] = useState<ConfigResponse["api"] | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -31,6 +33,7 @@ export function useBackend(): Backend {
       setPaths(config.paths);
       setApi(config.api);
       setWarning(config.warning);
+      setStyles(config.styles ?? []);
     };
 
     (async () => {
@@ -109,5 +112,5 @@ export function useBackend(): Backend {
     };
   }, []);
 
-  return { settings, state, pack, paths, api, warning, error };
+  return { settings, state, pack, styles, paths, api, warning, error };
 }
