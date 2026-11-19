@@ -10,8 +10,8 @@ const ILLUSTRATED = new Set<FormId>(["normal", "dark", "duo"]);
 /**
  * Motions the 像素Q pack can ask for.
  * Folders that already exist keep their approved frames.
- * think / work / wait are own clips (standing idle copied in until a pose sheet arrives).
- * Every other name plays a larger transform over the closest approved clip.
+ * normal/dark motion sheets are cut into their own 8-frame clips.
+ * Duo still borrows the closest clip when that pose has no duo sheet yet.
  * Sheets still needed are listed in PIXEL_SHEETS_NEEDED and packs/pixel-q/MOTIONS.md.
  */
 export const PIXEL_MOTIONS = [
@@ -44,19 +44,21 @@ export const PIXEL_MOTIONS = [
 
 export type PixelMotion = (typeof PIXEL_MOTIONS)[number] | "sad-dark" | "book" | "lean";
 
-/** Approved drawings already cut into 8-frame folders. */
-export const PIXEL_SHEETS_READY = ["idle", "happy", "joyful", "angry", "sad", "sad-dark", "sit", "book"] as const;
-
-/** Own clip names whose pixels are still the standing idle, waiting for a pose sheet. */
-export const PIXEL_STAND_IN = ["think", "work", "wait"] as const;
-
-/** Pose sheets to draw later, in the same v4 character. Do not invent these in code. */
-export const PIXEL_SHEETS_NEEDED = [
+/** Clips that play their own frames when the folder exists. */
+export const PIXEL_SHEETS_READY = [
+  "idle",
+  "happy",
+  "joyful",
+  "angry",
+  "sad",
+  "sad-dark",
+  "sit",
+  "book",
+  "lean",
   "wave",
   "nod",
   "refuse",
   "spin",
-  "sit",
   "sleep",
   "stretch",
   "surprise",
@@ -69,10 +71,35 @@ export const PIXEL_SHEETS_NEEDED = [
   "dance",
   "headpat",
   "laugh",
-  "lean",
   "think",
   "work",
   "wait",
+] as const;
+
+/** Duo think/work/wait still use the standing idle until a duo pose sheet exists. */
+export const PIXEL_STAND_IN = ["duo:think", "duo:work", "duo:wait"] as const;
+
+/** Duo pose sheets still missing. Solo sheets for these names are already packed. */
+export const PIXEL_SHEETS_NEEDED = [
+  "duo:wave",
+  "duo:nod",
+  "duo:refuse",
+  "duo:spin",
+  "duo:sleep",
+  "duo:stretch",
+  "duo:surprise",
+  "duo:shy",
+  "duo:tease",
+  "duo:peek",
+  "duo:bite",
+  "duo:toss",
+  "duo:clap",
+  "duo:dance",
+  "duo:headpat",
+  "duo:laugh",
+  "duo:think",
+  "duo:work",
+  "duo:wait",
 ] as const;
 
 const ART = new Set<string>([...PIXEL_SHEETS_READY, ...PIXEL_STAND_IN]);

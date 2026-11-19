@@ -2,33 +2,11 @@
 
 点击不改工作状态，也不改形态。立绘的点击不走这里。
 
-已有定稿帧：`idle`、`happy`、`joyful`、`angry`、`sad`、`sad-dark`、`sit`、`book`。
+常态樱和黑樱已有定稿帧：`idle`、`happy`、`joyful`、`angry`、`sad`，以及 `wave`、`nod`、`refuse`、`spin`、`sit`、`sleep`、`stretch`、`surprise`、`shy`、`tease`、`peek`、`bite`、`toss`、`clap`、`dance`、`headpat`、`laugh`、`think`、`work`、`wait`。双人另有 `sad-dark`、`sit`、`book`、`lean`。
 
-`think`、`work`、`wait` 是各自的片段，画面暂时用站立待机，等专用姿势稿。思考、工作、等待不再播 idle 这个名字。
+双人还没有单独姿势稿的名字，会播最接近的已有片段：`wave`→`joyful`，`nod`→`happy`，`refuse`→`angry`，`spin`→`joyful`，`sleep`→`sad`，`stretch`→`idle`，`surprise`→`joyful`，`shy`→`happy`，`tease`→`happy`，`peek`→`idle`，`bite`→`happy`，`toss`→`joyful`，`clap`→`happy`，`dance`→`joyful`，`headpat`→`happy`，`laugh`→`joyful`。双人的 `think`、`work`、`wait` 仍是站立待机的画面。
 
-还缺的姿势稿（不要用程序画）：`wave`、`nod`、`refuse`、`spin`、`sit`、`sleep`、`stretch`、`surprise`、`shy`、`tease`、`peek`、`bite`、`toss`、`clap`、`dance`、`headpat`、`laugh`、`lean`、`think`、`work`、`wait`。
-没有稿的名字会用更大的位移播最接近的定稿。双人的 sit、book 已有坐着看书的稿，单人 sit 仍落到哀的蹲姿。
-
-- `wave` → `joyful`
-- `nod` → `happy`
-- `refuse` → `angry`
-- `spin` → `joyful`
-- `sit` → `sad`
-- `sleep` → `sad`
-- `stretch` → `idle`
-- `surprise` → `joyful`
-- `shy` → `happy`
-- `tease` → `happy`
-- `peek` → `idle`
-- `bite` → `happy`
-- `toss` → `joyful`
-- `clap` → `happy`
-- `dance` → `joyful`
-- `headpat` → `happy`
-- `laugh` → `joyful`
-- `lean` → `idle`
-
-双人默认待机仍是站着一起捧苹果。`sit` 和 `book` 用坐着看书的定稿，不代替站立待机。
+双人默认待机仍是站着一起捧苹果。`sit` 和 `book` 用坐着看书的定稿，不代替站立待机。`lean` 里紫发在左、白发在右。
 
 动作名（常态樱和黑樱各 25 个定义，双人另有 sad-dark、book、lean）：
 

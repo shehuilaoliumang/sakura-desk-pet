@@ -767,6 +767,310 @@ function sheet(frames, columns) {
   return img;
 }
 
+function listComponents(img) {
+  const { w, h, rgba } = img;
+  const id = new Int32Array(w * h);
+  const comps = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (id[p] || rgba[p * 4 + 3] < 16) continue;
+      const pixels = [];
+      const stack = [p];
+      id[p] = comps.length + 1;
+      let x0 = x;
+      let y0 = y;
+      let x1 = x;
+      let y1 = y;
+      let reds = 0;
+      let yellows = 0;
+      let inks = 0;
+      for (let qs = 0; qs < stack.length; qs++) {
+        const cp = stack[qs];
+        pixels.push(cp);
+        const cx = cp % w;
+        const cy = (cp / w) | 0;
+        if (cx < x0) x0 = cx;
+        if (cy < y0) y0 = cy;
+        if (cx > x1) x1 = cx;
+        if (cy > y1) y1 = cy;
+        const i = cp * 4;
+        const r = rgba[i];
+        const g = rgba[i + 1];
+        const b = rgba[i + 2];
+        if (r > 150 && g < 130 && b < 130 && r > g + 35 && r > b + 35) reds++;
+        if (r > 190 && g > 150 && b < 150) yellows++;
+        if (r < 90 && g < 90 && b < 100 && Math.max(r, g, b) - Math.min(r, g, b) < 40) inks++;
+        for (const np of [cp + 1, cp - 1, cp + w, cp - w]) {
+          if (np < 0 || np >= w * h || id[np] || rgba[np * 4 + 3] < 16) continue;
+          id[np] = comps.length + 1;
+          stack.push(np);
+        }
+      }
+      comps.push({ n: pixels.length, pixels, x0, y0, x1: x1 + 1, y1: y1 + 1, reds, yellows, inks });
+    }
+  }
+  comps.sort((a, b) => b.n - a.n);
+  return comps;
+}
+
+function boxGap(a, b) {
+  const dx = Math.max(0, Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1));
+  const dy = Math.max(0, Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1));
+  return Math.hypot(dx, dy);
+}
+
+function eraseGroundApples(img) {
+  const { w, h, rgba } = img;
+  const seen = new Uint8Array(w * h);
+  const blobs = [];
+  const isRed = (i) => rgba[i + 3] > 140 && rgba[i] > 155 && rgba[i + 1] < 125 && rgba[i + 2] < 125 && rgba[i] > rgba[i + 1] + 40;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (seen[p] || !isRed(p * 4)) continue;
+      const pixels = [];
+      const stack = [p];
+      seen[p] = 1;
+      let x0 = x;
+      let y0 = y;
+      let x1 = x;
+      let y1 = y;
+      for (let qs = 0; qs < stack.length; qs++) {
+        const cp = stack[qs];
+        pixels.push(cp);
+        const cx = cp % w;
+        const cy = (cp / w) | 0;
+        if (cx < x0) x0 = cx;
+        if (cy < y0) y0 = cy;
+        if (cx > x1) x1 = cx;
+        if (cy > y1) y1 = cy;
+        for (const np of [cp + 1, cp - 1, cp + w, cp - w]) {
+          if (np < 0 || np >= w * h || seen[np] || !isRed(np * 4)) continue;
+          seen[np] = 1;
+          stack.push(np);
+        }
+      }
+      const bw = x1 - x0 + 1;
+      const bh = y1 - y0 + 1;
+      const fill = pixels.length / (bw * bh);
+      const aspect = bw / bh;
+      if (pixels.length > 280 && y0 > h * 0.7 && fill > 0.32 && aspect > 0.55 && aspect < 2.4) {
+        blobs.push({ pixels, x0, y0, x1, y1 });
+      }
+    }
+  }
+  if (!blobs.length) return img;
+  const kill = new Uint8Array(w * h);
+  for (const blob of blobs) {
+    for (let y = blob.y0 - 18; y <= blob.y1 + 8; y++) {
+      for (let x = blob.x0 - 8; x <= blob.x1 + 8; x++) {
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+        const p = y * w + x;
+        const i = p * 4;
+        if (rgba[i + 3] < 16) continue;
+        const r = rgba[i];
+        const g = rgba[i + 1];
+        const b = rgba[i + 2];
+        const luma = (r + g + b) / 3;
+        const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+        const dress = luma < 36 && chroma < 28;
+        if (!dress) kill[p] = 1;
+      }
+    }
+  }
+  for (let pass = 0; pass < 10; pass++) {
+    const add = [];
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const p = y * w + x;
+        if (kill[p] || rgba[p * 4 + 3] < 8) continue;
+        let near = false;
+        for (const np of [p + 1, p - 1, p + w, p - w]) if (kill[np]) near = true;
+        if (!near) continue;
+        const r = rgba[p * 4];
+        const g = rgba[p * 4 + 1];
+        const b = rgba[p * 4 + 2];
+        const luma = (r + g + b) / 3;
+        if (luma > 70 || (rgba[p * 4 + 3] < 210 && luma > 36) || (r > 70 && r > g + 12 && r > b + 12)) add.push(p);
+      }
+    }
+    if (!add.length) break;
+    for (const p of add) kill[p] = 1;
+  }
+  for (let p = 0; p < w * h; p++) if (kill[p]) rgba[p * 4 + 3] = 0;
+  const leftover = listComponents(img);
+  if (leftover.length > 1) {
+    const body = leftover[0];
+    for (const part of leftover.slice(1)) {
+      const cy = (part.y0 + part.y1) / 2;
+      let dark = 0;
+      for (const p of part.pixels) {
+        const luma = (rgba[p * 4] + rgba[p * 4 + 1] + rgba[p * 4 + 2]) / 3;
+        if (luma < 42) dark++;
+      }
+      if (part.n < 2500 && cy > h * 0.68 && dark / part.n < 0.65) {
+        for (const p of part.pixels) rgba[p * 4 + 3] = 0;
+      }
+    }
+  }
+  const body = boundsOf(img);
+  const mid = (body.x0 + body.x1) / 2;
+  for (let y = body.y0 + Math.round((body.y1 - body.y0) * 0.62); y < body.y1; y++) {
+    for (let x = body.x0; x < body.x1; x++) {
+      const p = y * w + x;
+      const i = p * 4;
+      if (rgba[i + 3] < 12) continue;
+      const luma = (rgba[i] + rgba[i + 1] + rgba[i + 2]) / 3;
+      const side = x < mid - w * 0.05 || x > mid + w * 0.05;
+      if (!side || luma < 145) continue;
+      let open = 0;
+      for (const np of [p + 1, p - 1, p + w, p - w]) {
+        if (np < 0 || np >= w * h || rgba[np * 4 + 3] < 48) open++;
+      }
+      if (open >= 1) rgba[i + 3] = 0;
+    }
+  }
+  return img;
+}
+
+/** Drop overlay props that are not part of the character. */
+function stripExtras(img, mode) {
+  const comps = listComponents(img);
+  if (comps.length < 2) return img;
+  const main = comps[0];
+  const mainH = main.y1 - main.y0;
+  for (const part of comps.slice(1)) {
+    const gap = boxGap(main, part);
+    const redRatio = part.reds / part.n;
+    const yellowRatio = part.yellows / part.n;
+    const inkRatio = part.inks / part.n;
+    const low = (part.y0 + part.y1) / 2 > main.y0 + mainH * 0.62;
+    const high = part.y1 < main.y0 + mainH * 0.28;
+    let drop = gap > 8 && part.n < main.n * 0.025;
+    if (mode === "apple" && redRatio > 0.42 && low) drop = true;
+    if (mode === "sparkle" && yellowRatio > 0.35 && part.n < main.n * 0.06) drop = true;
+    if (mode === "zzz" && inkRatio > 0.45 && high && part.n < main.n * 0.08) drop = true;
+    if (mode === "swirl" && gap > 3 && part.n < main.n * 0.04) drop = true;
+    if (!drop) continue;
+    for (const p of part.pixels) img.rgba[p * 4 + 3] = 0;
+  }
+  return trim(img);
+}
+
+function canvasFromIdle(form) {
+  const idle = decodePacked(fs.readFileSync(path.join(outRoot, form, "idle", "01.png")));
+  return { w: idle.w, h: idle.h, ground: Math.round(idle.h * 0.94), cx: Math.round(idle.w / 2) };
+}
+
+function fitPose(sprite, targetHead, canvas) {
+  let fitted = fitHead(sprite, targetHead);
+  const maxW = Math.round(canvas.w * 0.94);
+  const maxH = Math.max(8, canvas.ground - 2);
+  const scale = Math.min(1, maxW / fitted.w, maxH / fitted.h);
+  return { sprite: fitted, scale };
+}
+
+const MOTION_NAMES = [
+  "wave",
+  "sit",
+  "sleep",
+  "stretch",
+  "shy",
+  "surprise",
+  "headpat",
+  "think",
+  "dance",
+  "bite",
+  "nod",
+  "refuse",
+  "spin",
+  "tease",
+  "peek",
+  "toss",
+  "clap",
+  "laugh",
+  "work",
+  "wait",
+];
+
+function extraMode(form, motion) {
+  if (form === "dark" && motion === "sleep") return "zzz";
+  if (form === "normal" && motion === "think") return "sparkle";
+  if (form === "normal" && motion === "spin") return "swirl";
+  if (motion === "clap" || motion === "work") return "apple";
+  return "";
+}
+
+function packSheet(file, mode) {
+  const keyed = keyPaper(loadJpeg(file));
+  const poses = splitThree(keyed).map((pose) => stripExtras(pose, mode));
+  if (poses.length !== 3) throw new Error(`${file} poses ${poses.length}`);
+  return poses;
+}
+
+function packNewMotions() {
+  const motionDir = path.join(srcDir, "motions");
+  const art = "/opt/cursor/artifacts";
+  fs.mkdirSync(art, { recursive: true });
+  for (const form of ["normal", "dark"]) {
+    const idle = loadCut(`${form}_idle.jpg`);
+    const targetHead = headWidth(fitHeight(idle, CHAR_H));
+    const canvas = canvasFromIdle(form);
+    console.log(`${form} canvas ${canvas.w}x${canvas.h} head ${targetHead}`);
+    const only = new Set((process.argv.find((arg) => arg.startsWith("--only=")) ?? "").slice(7).split(",").filter(Boolean));
+    for (const motion of MOTION_NAMES) {
+      if (only.size && !only.has(motion)) continue;
+      const file = path.join(motionDir, `${form}_${motion}.jpg`);
+      const poses = packSheet(file, extraMode(form, motion)).map((pose) => fitPose(pose, targetHead, canvas));
+      const beats = [
+        { pose: 0, dy: 0 },
+        { pose: 0, dy: -0.01 },
+        { pose: 1, dy: 0 },
+        { pose: 1, dy: -0.008 },
+        { pose: 2, dy: 0 },
+        { pose: 2, dy: 0.008 },
+        { pose: 1, dy: 0.004 },
+        { pose: 0, dy: 0 },
+      ];
+      const frames = beats.map((beat) => frame(canvas, poses[beat.pose].sprite, { ...beat, sx: poses[beat.pose].scale, sy: poses[beat.pose].scale }));
+      if (extraMode(form, motion) === "apple") {
+        for (const item of frames) eraseGroundApples(item);
+      }
+      writeClip(form, motion, frames);
+      const preview = sheet(frames.map((item) => resample(item, Math.max(1, Math.round(item.w * 0.34)), Math.max(1, Math.round(item.h * 0.34)))), 4);
+      writePng(path.join(art, `pixel_q_${form}_${motion}_v4.png`), preview);
+      console.log(`  ${form}/${motion} scales ${poses.map((pose) => pose.scale.toFixed(2)).join(",")}`);
+    }
+  }
+  if (process.argv.some((arg) => arg.startsWith("--only=")) && !process.argv.includes("--only=lean") && !(process.argv.find((arg) => arg.startsWith("--only=")) ?? "").includes("lean")) {
+    return;
+  }
+  const duoIdle = loadCut("duo_idle.jpg");
+  const duoHead = headWidth(fitHeight(duoIdle, CHAR_H));
+  const duoCanvas = canvasFromIdle("duo");
+  const leanPoses = packSheet(path.join(motionDir, "duo_lean.jpg"), "").map((pose) => fitPose(pose, duoHead, duoCanvas));
+  const leanBeats = [
+    { pose: 0, dy: 0 },
+    { pose: 0, dy: -0.008 },
+    { pose: 1, dy: 0 },
+    { pose: 1, dy: -0.006 },
+    { pose: 2, dy: 0 },
+    { pose: 2, dy: 0.006 },
+    { pose: 1, dy: 0.004 },
+    { pose: 0, dy: 0 },
+  ];
+  const leanFrames = leanBeats.map((beat) =>
+    frame(duoCanvas, leanPoses[beat.pose].sprite, { ...beat, sx: leanPoses[beat.pose].scale, sy: leanPoses[beat.pose].scale }),
+  );
+  writeClip("duo", "lean", leanFrames);
+  writePng(
+    path.join(art, "pixel_q_duo_lean_v4.png"),
+    sheet(leanFrames.map((item) => resample(item, Math.max(1, Math.round(item.w * 0.34)), Math.max(1, Math.round(item.h * 0.34)))), 4),
+  );
+  console.log(`duo/lean scales ${leanPoses.map((pose) => pose.scale.toFixed(2)).join(",")}`);
+}
+
 function main() {
   const normal = buildSolo("normal");
   const dark = buildSolo("dark");
@@ -836,4 +1140,5 @@ function decodePacked(buf) {
   return { w, h, rgba };
 }
 
-main();
+if (process.argv.includes("--motions")) packNewMotions();
+else main();
